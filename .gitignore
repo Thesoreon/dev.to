@@ -39,7 +39,6 @@ latest.dump
 /public/packs
 /public/packs-test
 /node_modules
-config/database.yml
 
 # Ignore storybook static site generation
 storybook-static/
@@ -53,3 +52,20 @@ package-lock.json
 
 #sitemap
 /public/sitemap.xml.gz
+
+# Development Docker storage location
+_docker-storage/
+
+# YARD generated doc (in the Gitdocs folder)
+docs/.static/ruby-doc/
+# ReDoc generated API doc (in the Gitdocs folder)
+docs/.static/api/
+
+# AWS Cloud9 specific folder for user settings
+.c9/
+
+# rvm
+.ruby-gemset
+
+# asdf
+.tool-versions

@@ -1,34 +1,9 @@
 class GiveawaysController < ApplicationController
-  # GET /giveaways/new
-
   def new
     @user = current_user
     @errors = []
   end
 
-  def edit
-    @user = current_user
-    @errors = []
-  end
-
-  # POST /giveaways
-  # POST /giveaways.json
-  # def create
-  #   @user = User.new(giveaway_params)
-  #
-  #   respond_to do |format|
-  #     if @user.save
-  #       format.html { redirect_to @user, notice: 'Giveaway was successfully created.' }
-  #       format.json { render :show, status: :created, location: @user }
-  #     else
-  #       format.html { render :new }
-  #       format.json { render json: @user.errors, status: :unprocessable_entity }
-  #     end
-  #   end
-  # end
-
-  # PATCH/PUT /giveaways/1
-  # PATCH/PUT /giveaways/1.json
   def update
     prevent_request_if_requested_twice
     @user = current_user
@@ -86,26 +61,26 @@ class GiveawaysController < ApplicationController
   end
 
   def confirm_presence
-    unless user_params[:shipping_name].present?
+    if user_params[:shipping_name].blank?
       @errors << "You need a shipping name"
       @invalid_form = true
     end
-    unless user_params[:shipping_address].present?
+    if user_params[:shipping_address].blank?
       @errors << "You need a shipping address"
       @invalid_form = true
     end
-    unless user_params[:shipping_city].present?
+    if user_params[:shipping_city].blank?
       @errors << "You need a shipping city"
       @invalid_form = true
     end
-    unless user_params[:shipping_country].present?
+    if user_params[:shipping_country].blank?
       @errors << "You need a shipping country"
       @invalid_form = true
     end
-    unless user_params[:top_languages].present?
-      @errors << "You need to include your favorite languages. It's a spam filter."
-      @invalid_form = true
-    end
+    return if user_params[:top_languages].present?
+
+    @errors << "You need to include your favorite languages. It's a spam filter."
+    @invalid_form = true
   end
 
   def prevent_request_if_requested_twice

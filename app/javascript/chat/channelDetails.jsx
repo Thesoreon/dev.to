@@ -93,7 +93,7 @@ class ChannelDetails extends Component {
   };
 
   userInList = (list, user) => {
-    const keys = Object.keys(list)
+    const keys = Object.keys(list);
     for (const key of keys) {
       if (user.id === list[key].id) {
         return true;
@@ -144,24 +144,16 @@ class ChannelDetails extends Component {
           if (this.userInList(channel.channel_users, user)) {
             invite = (
               <span className="channel__member">
-                is already in
-                {' '}
-                <em>{channel.channel_name}</em>
+                is already in <em>{channel.channel_name}</em>
               </span>
             );
           }
           return (
             <div className="channeldetails__searchedusers">
               <a href={user.path} target="_blank" rel="noopener noreferrer">
-                <img src={user.user.profile_image_90} alt="profile_image"/>
-                @
-                {user.user.username}
-                {' '}
--
-                {' '}
-                {user.title}
-              </a>
-              {' '}
+                <img src={user.user.profile_image_90} alt="profile_image" />@
+                {user.user.username} - {user.title}
+              </a>{' '}
               {invite}
             </div>
           );
@@ -175,12 +167,7 @@ class ChannelDetails extends Component {
             rel="noopener noreferrer"
             data-content={`users/${user.id}`}
           >
-            @
-            {user.username}
-            {' '}
--
-            {' '}
-            {user.name}
+            @{user.username} - {user.name}
           </a>
         </div>
       ));
@@ -188,14 +175,11 @@ class ChannelDetails extends Component {
         <div className="channeldetails__inviteusers">
           <h2>Invite Members</h2>
           <input onKeyUp={this.triggerUserSearch} placeholder="Find users" />
-          <div className="channeldetails__searchresults">
-            {searchedUsers}
-          </div>
+          <div className="channeldetails__searchresults">{searchedUsers}</div>
           <h2>Pending Invites:</h2>
           {pendingInvites}
           <div style={{ marginTop: '10px' }}>
-            All functionality is early beta. Contact us if you need help with
-            anything.
+            Contact yo@dev.to for assistance.
           </div>
         </div>
       ); // eslint-disable-next-line
@@ -204,21 +188,12 @@ class ChannelDetails extends Component {
         <div className="channeldetails__leftchannel">
           <h2>Danger Zone</h2>
           <h3>
-            You have left this channel
-            {' '}
+            You have left this channel{' '}
             <span role="img" aria-label="emoji">
               😢😢😢
             </span>
           </h3>
-          <h4>It may not be immediately in the sidebar</h4>
-          <p>
-            Contact the admins at
-            {' '}
-            <a href="mailto:yo@dev.to">yo@dev.to</a>
-            {' '}
-if
-            this was a mistake
-          </p>
+          <h4>This may take a few minutes to be reflected in the sidebar</h4>
         </div>
       );
     } else {
@@ -227,7 +202,7 @@ if
           <h2>Danger Zone</h2>
           <button
             type="button"
-            Click={this.triggerLeaveChannel}
+            onClick={this.triggerLeaveChannel}
             data-content={channel.id}
           >
             Leave Channel

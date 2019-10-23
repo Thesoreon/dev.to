@@ -1,54 +1,76 @@
 class UsersController < ApplicationController
   before_action :set_no_cache_header
-  after_action :verify_authorized, except: [:signout_confirm]
+  before_action :raise_banned, only: %i[update]
+  after_action :verify_authorized, except: %i[signout_confirm add_org_admin remove_org_admin remove_from_org]
 
   # GET /settings/@tab
   def edit
     unless current_user
       skip_authorization
-      return redirect_to "/enter"
+      return redirect_to sign_up_path
     end
-    @user = current_user
-    @tab_list = @user.settings_tab_list
-    @tab = params["tab"]
-    authorize @user
+    set_user
+    set_tabs(params["tab"] || "profile")
     handle_settings_tab
   end
 
   # PATCH/PUT /users/:id.:format
   def update
-    @user = current_user
-    @tab_list = @user.settings_tab_list
-    @tab = params["user"]["tab"] || "profile"
-    authorize @user
-    # raise permitted_attributes(@user).to_s
+    set_user
+    set_tabs(params["user"]["tab"])
     if @user.update(permitted_attributes(@user))
-      RssReader.new(request.request_id).delay.fetch_user(@user) if @user.feed_url.present?
+      RssReaderFetchUserJob.perform_later(@user.id)
       notice = "Your profile was successfully updated."
-
       if @user.export_requested?
-        notice = notice + " The export will be emailed to you shortly."
-        Exporter::Service.new(@user).delay.export(send_email: true)
+        notice += " The export will be emailed to you shortly."
+        ExportContentJob.perform_later(@user.id)
       end
-
+      cookies.permanent[:user_experience_level] = @user.experience_level.to_s if @user.experience_level.present?
       follow_hiring_tag(@user)
+      flash[:settings_notice] = notice
       @user.touch(:profile_updated_at)
-      redirect_to "/settings/#{@tab}", notice: notice
+      redirect_to "/settings/#{@tab}"
+    else
+      render :edit
+    end
+  end
+
+  def update_twitch_username
+    set_user
+    set_tabs("integrations")
+    new_twitch_username = params[:user][:twitch_username]
+    if @user.twitch_username != new_twitch_username
+      if @user.update(twitch_username: new_twitch_username)
+        @user.touch(:profile_updated_at)
+        Streams::TwitchWebhookRegistrationJob.perform_later(@user.id) if @user.twitch_username?
+      end
+      flash[:settings_notice] = "Your Twitch username was successfully updated."
+    end
+    redirect_to "/settings/#{@tab}"
+  end
+
+  def update_language_settings
+    set_user
+    set_tabs("misc")
+    @user.language_settings["preferred_languages"] = Languages::LIST.keys & params[:user][:preferred_languages].to_a
+    if @user.save
+      flash[:settings_notice] = "Your language settings were successfully updated."
+      @user.touch(:profile_updated_at)
+      redirect_to "/settings/#{@tab}"
     else
       render :edit
     end
   end
 
   def destroy
-    @user = current_user
-    @tab_list = @user.settings_tab_list
-    @tab = "account"
-    authorize @user
+    set_user
+    set_tabs("account")
     if @user.articles_count.zero? && @user.comments_count.zero?
       @user.destroy!
       NotifyMailer.account_deleted_email(@user).deliver
+      flash[:settings_notice] = "Your account has been deleted."
       sign_out @user
-      redirect_to root_path, notice: "Your account has been deleted."
+      redirect_to root_path
     else
       flash[:error] = "An error occurred. Try requesting an account deletion below."
       redirect_to "/settings/#{@tab}"
@@ -56,82 +78,90 @@ class UsersController < ApplicationController
   end
 
   def remove_association
-    @user = current_user
-    authorize @user
+    set_user
     provider = params[:provider]
     identity = @user.identities.find_by(provider: provider)
-    @tab_list = @user.settings_tab_list
-    @tab = "account"
-    if @user.identities.count == 2 && identity
+    set_tabs("account")
+
+    if @user.identities.size == 2 && identity
       identity.destroy
+
       identity_username = "#{provider}_username".to_sym
-      @user.update(identity_username => nil)
-      redirect_to "/settings/#{@tab}",
-        notice: "Your #{provider.capitalize} account was successfully removed."
+      @user.update(identity_username => nil, profile_updated_at: Time.current)
+
+      flash[:settings_notice] = "Your #{provider.capitalize} account was successfully removed."
     else
       flash[:error] = "An error occurred. Please try again or send an email to: yo@dev.to"
-      redirect_to "/settings/#{@tab}"
     end
+    redirect_to "/settings/#{@tab}"
   end
 
   def onboarding_update
-    if params[:user]
-      current_user.update(JSON.parse(params[:user]).to_h)
-    end
+    current_user.assign_attributes(params[:user].permit(:summary, :location, :employment_title, :employer_name, :last_onboarding_page)) if params[:user]
     current_user.saw_onboarding = true
     authorize User
-    if current_user.save!
-      respond_to do |format|
-        format.json { render json: { outcome: "onboarding closed" } }
-      end
-    else
-      respond_to do |format|
-        format.json { render json: { outcome: "onboarding opened" } }
-      end
-    end
+    render_update_response
+  end
+
+  def onboarding_checkbox_update
+    current_user.assign_attributes(params[:user].permit(:checked_code_of_conduct, :checked_terms_and_conditions, :email_membership_newsletter, :email_digest_periodic)) if params[:user]
+    current_user.saw_onboarding = true
+    authorize User
+    render_update_response
   end
 
   def join_org
     authorize User
-    if @organization = Organization.find_by_secret(params[:org_secret])
-      current_user.update(organization_id: @organization.id)
-      redirect_to "/settings/organization",
-        notice: "You have joined the #{@organization.name} organization."
+    if (@organization = Organization.find_by(secret: params[:org_secret].strip))
+      OrganizationMembership.create(user_id: current_user.id, organization_id: @organization.id, type_of_user: "member")
+      flash[:settings_notice] = "You have joined the #{@organization.name} organization."
+      redirect_to "/settings/organization/#{@organization.id}"
     else
-      not_found
+      flash[:error] = "The given organization secret was invalid."
+      redirect_to "/settings/organization/new"
     end
   end
 
   def leave_org
-    authorize User
-    current_user.update(organization_id: nil, org_admin: nil)
-    redirect_to "/settings/organization",
-      notice: "You have left your organization."
+    org = Organization.find_by(id: params[:organization_id])
+    authorize org
+    OrganizationMembership.find_by(organization_id: org.id, user_id: current_user.id)&.delete
+    flash[:settings_notice] = "You have left your organization."
+    redirect_to "/settings/organization/new"
   end
 
   def add_org_admin
-    user = User.find(params[:user_id])
-    authorize user
-    user.update(org_admin: true)
-    user.add_role :analytics_beta_tester if user.organization.approved
-    redirect_to "/settings/organization",
-      notice: "#{user.name} is now an admin."
+    adminable = User.find(params[:user_id])
+    org = Organization.find_by(id: params[:organization_id])
+
+    not_authorized unless current_user.org_admin?(org) && OrganizationMembership.exists?(user: adminable, organization: org)
+
+    OrganizationMembership.find_by(user_id: adminable.id, organization_id: org.id).update(type_of_user: "admin")
+    flash[:settings_notice] = "#{adminable.name} is now an admin."
+    redirect_to "/settings/organization/#{org.id}"
   end
 
   def remove_org_admin
-    user = User.find(params[:user_id])
-    authorize user
-    user.update(org_admin: false)
-    redirect_to "/settings/organization",
-      notice: "#{user.name} is no longer an admin."
+    unadminable = User.find(params[:user_id])
+    org = Organization.find_by(id: params[:organization_id])
+
+    not_authorized unless current_user.org_admin?(org) && unadminable.org_admin?(org)
+
+    OrganizationMembership.find_by(user_id: unadminable.id, organization_id: org.id).update(type_of_user: "member")
+    flash[:settings_notice] = "#{unadminable.name} is no longer an admin."
+    redirect_to "/settings/organization/#{org.id}"
   end
 
   def remove_from_org
-    user = User.find(params[:user_id])
-    authorize user
-    user.update(organization_id: nil)
-    redirect_to "/settings/organization",
-      notice: "#{user.name} is no longer part of your organization."
+    removable = User.find(params[:user_id])
+    org = Organization.find_by(id: params[:organization_id])
+    removable_org_membership = OrganizationMembership.find_by(user_id: removable.id, organization_id: org.id)
+
+    not_authorized unless current_user.org_admin?(org) && removable_org_membership
+
+    removable_org_membership.delete
+    flash[:settings_notice] = "#{removable.name} is no longer part of your organization."
+    redirect_to "/settings/organization/#{org.id}"
   end
 
   def signout_confirm; end
@@ -139,7 +169,8 @@ class UsersController < ApplicationController
   def follow_hiring_tag(user)
     return unless user.looking_for_work?
 
-    user.delay.follow(Tag.find_by(name: "hiring"))
+    hiring_tag = Tag.find_by(name: "hiring")
+    Users::FollowJob.perform_later(user.id, hiring_tag.id, "Tag")
   end
 
   def handle_settings_tab
@@ -147,44 +178,92 @@ class UsersController < ApplicationController
 
     case @tab
     when "organization"
-      @organization = @user.organization || Organization.new
-    when "switch-organizations"
-      @organization = Organization.new
+      handle_organization_tab
     when "integrations"
-      if current_user.identities.where(provider: "github").any?
-        @client = Octokit::Client.
-          new(access_token: current_user.identities.where(provider: "github").last.token)
-      end
+      handle_integrations_tab
     when "billing"
-      stripe_code = current_user.stripe_id_code
-      return if stripe_code == "special"
-
-      @customer = Stripe::Customer.retrieve(stripe_code) if !stripe_code.blank?
-    when "membership"
-      if current_user.monthly_dues.zero?
-        redirect_to "/membership"
-        return
-      end
+      handle_billing_tab
+    when "pro-membership"
+      handle_pro_membership_tab
     when "account"
-      @email_body = <<~HEREDOC
-        Hello DEV Team,
-        %0A
-        %0A
-        I would like to delete my dev.to account.
-        %0A%0A
-        You can keep any comments and discussion posts under the Ghost account.
-        %0A
-        ---OR---
-        %0A
-        Please delete all my personal information, including comments and discussion posts.
-        %0A
-        %0A
-        Regards,
-        %0A
-        YOUR-DEV-USERNAME-HERE
-      HEREDOC
+      handle_account_tab
     else
-      not_found unless @tab_list.map { |t| t.downcase.gsub(" ", "-") }.include? @tab
+      not_found unless @tab_list.map { |t| t.downcase.tr(" ", "-") }.include? @tab
     end
+  end
+
+  private
+
+  def render_update_response
+    if current_user.save
+      respond_to do |format|
+        format.json { render json: { outcome: "updated successfully" } }
+      end
+    else
+      respond_to do |format|
+        format.json { render json: { outcome: "update failed" } }
+      end
+    end
+  end
+
+  def handle_organization_tab
+    @organizations = @current_user.organizations.order("name ASC")
+    if params[:org_id] == "new" || params[:org_id].blank? && @organizations.size.zero?
+      @organization = Organization.new
+    elsif params[:org_id].blank? || params[:org_id].match?(/\d/)
+      @organization = Organization.find_by(id: params[:org_id]) || @organizations.first
+      authorize @organization, :part_of_org?
+
+      @org_organization_memberships = @organization.organization_memberships.includes(:user)
+      @organization_membership = OrganizationMembership.find_by(user_id: current_user.id, organization_id: @organization.id)
+    end
+  end
+
+  def handle_integrations_tab
+    return unless current_user.identities.where(provider: "github").any?
+
+    @client = Octokit::Client.
+      new(access_token: current_user.identities.where(provider: "github").last.token)
+  end
+
+  def handle_billing_tab
+    stripe_code = current_user.stripe_id_code
+    return if stripe_code == "special"
+
+    @customer = Payments::Customer.get(stripe_code) if stripe_code.present?
+  end
+
+  def handle_pro_membership_tab
+    @pro_membership = current_user.pro_membership
+  end
+
+  def handle_account_tab
+    @email_body = <<~HEREDOC
+      Hello DEV Team,
+      %0A
+      %0A
+      I would like to delete my dev.to account.
+      %0A%0A
+      You can keep any comments and discussion posts under the Ghost account.
+      %0A
+      ---OR---
+      %0A
+      Please delete all my personal information, including comments and discussion posts.
+      %0A
+      %0A
+      Regards,
+      %0A
+      YOUR-DEV-USERNAME-HERE
+    HEREDOC
+  end
+
+  def set_user
+    @user = current_user
+    authorize @user
+  end
+
+  def set_tabs(current_tab = "profile")
+    @tab_list = @user.settings_tab_list
+    @tab = current_tab
   end
 end

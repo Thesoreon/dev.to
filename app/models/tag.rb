@@ -5,23 +5,29 @@ class Tag < ActsAsTaggableOn::Tag
   acts_as_followable
   resourcify
 
-  NAMES = %w(
-    beginners career computerscience git go java javascript react vue
-    linux productivity python security webdev css php opensource
-    ruby cpp dotnet swift testing devops vim kotlin rust elixir
-    scala vscode docker aws android ios angular csharp typescript django rails
-    clojure ubuntu elm gamedev flutter bash
-  ).freeze
+  NAMES = %w[
+    beginners career computerscience git go java javascript react vue webassembly
+    linux productivity python security webdev css php laravel opensource npm a11y
+    ruby cpp dotnet swift testing devops vim kotlin rust elixir graphql blockchain sre
+    scala vscode docker kubernetes aws android ios angular csharp typescript django rails
+    clojure ubuntu elm gamedev flutter dart bash machinelearning sql
+  ].freeze
+
+  ALLOWED_CATEGORIES = %w[uncategorized language library tool site_mechanic location subcommunity].freeze
 
   attr_accessor :tag_moderator_id, :remove_moderator_id
+
+  belongs_to :badge, optional: true
+  has_one :sponsorship, as: :sponsorable, inverse_of: :sponsorable, dependent: :destroy
 
   mount_uploader :profile_image, ProfileImageUploader
   mount_uploader :social_image, ProfileImageUploader
 
   validates :text_color_hex,
-    format: /\A#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})\z/, allow_nil: true
+            format: /\A#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})\z/, allow_nil: true
   validates :bg_color_hex,
-    format: /\A#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})\z/, allow_nil: true
+            format: /\A#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})\z/, allow_nil: true
+  validates :category, inclusion: { in: ALLOWED_CATEGORIES }
 
   validate :validate_alias
   before_validation :evaluate_markdown
@@ -31,14 +37,14 @@ class Tag < ActsAsTaggableOn::Tag
   before_save :mark_as_updated
 
   algoliasearch per_environment: true do
-    attribute :name, :bg_color_hex, :text_color_hex, :hotness_score, :supported, :short_summary
+    attribute :name, :bg_color_hex, :text_color_hex, :hotness_score, :supported, :short_summary, :rules_html
     attributesForFaceting [:supported]
     customRanking ["desc(hotness_score)"]
-    searchableAttributes ["name", "short_summary"]
+    searchableAttributes %w[name short_summary]
   end
 
   def submission_template_customized(param_0 = nil)
-    submission_template.gsub("PARAM_0", param_0)
+    submission_template&.gsub("PARAM_0", param_0)
   end
 
   def tag_moderator_ids
@@ -51,6 +57,10 @@ class Tag < ActsAsTaggableOn::Tag
     end
   end
 
+  def self.valid_categories
+    ALLOWED_CATEGORIES
+  end
+
   private
 
   def evaluate_markdown
@@ -61,25 +71,18 @@ class Tag < ActsAsTaggableOn::Tag
   def calculate_hotness_score
     self.hotness_score = Article.tagged_with(name).
       where("articles.featured_number > ?", 7.days.ago.to_i).
-      map do |a|
-        (a.comments_count * 14) + (a.reactions_count * 4) + rand(6) + ((taggings_count + 1) / 2)
+      map do |article|
+        (article.comments_count * 14) + (article.reactions_count * 4) + rand(6) + ((taggings_count + 1) / 2)
       end.
       sum
   end
 
   def bust_cache
-    cache_buster = CacheBuster.new
-    cache_buster.bust("/t/#{name}")
-    cache_buster.bust("/t/#{name}?i=i")
-    cache_buster.bust("/t/#{name}/?i=i")
-    cache_buster.bust("/t/#{name}/")
-    cache_buster.bust("/tags")
+    Tags::BustCacheJob.perform_later(name)
   end
 
   def validate_alias
-    if alias_for.present? && !Tag.find_by_name(alias_for)
-      errors.add(:tag, "alias_for must refer to existing tag")
-    end
+    errors.add(:tag, "alias_for must refer to existing tag") if alias_for.present? && !Tag.find_by(name: alias_for)
   end
 
   def pound_it

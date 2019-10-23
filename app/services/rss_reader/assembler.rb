@@ -18,6 +18,7 @@ class RssReader
         ---
         title: #{@title}
         published: false
+        date: #{@item.published}
         tags: #{get_tags}
         canonical_url: #{@user.feed_mark_canonical ? @feed_source_url : ''}
         ---
@@ -37,9 +38,17 @@ class RssReader
     def assemble_body_markdown
       cleaned_content = HtmlCleaner.new.clean_html(get_content)
       cleaned_content = thorough_parsing(cleaned_content, @feed.url)
-      ReverseMarkdown.
+
+      content = ReverseMarkdown.
         convert(cleaned_content, github_flavored: true).
-        gsub("```\n\n```", "").gsub(/&nbsp;|\u00A0/, " ")
+        gsub("```\n\n```", "").
+        gsub(/&nbsp;|\u00A0/, " ")
+
+      content.gsub!(/{%\syoutube\s(.{11,18})\s%}/) do |tag|
+        tag.gsub("\\_", "_")
+      end
+
+      content
     end
 
     def get_content
@@ -48,11 +57,12 @@ class RssReader
 
     def thorough_parsing(content, feed_url)
       html_doc = Nokogiri::HTML(content)
-      find_and_replace_possible_links!(html_doc)
+      find_and_replace_possible_links!(html_doc) if @user.feed_referential_link
       if feed_url.include?("medium.com")
         parse_and_translate_gist_iframe!(html_doc)
         parse_and_translate_youtube_iframe!(html_doc)
         parse_and_translate_tweet!(html_doc)
+        parse_liquid_variable!(html_doc)
       else
         clean_relative_path!(html_doc, feed_url)
       end
@@ -67,7 +77,7 @@ class RssReader
         possible_link = a_tag[0].inner_html
         if /medium\.com\/media\/.+\/href/.match?(possible_link)
           real_link = HTTParty.head(possible_link).request.last_uri.to_s
-          return unless real_link.include?("gist.github.com")
+          return nil unless real_link.include?("gist.github.com")
 
           iframe.name = "p"
           iframe.keys.each { |attr| iframe.remove_attribute(attr) }
@@ -93,11 +103,19 @@ class RssReader
       end
     end
 
+    def parse_liquid_variable!(html_doc)
+      # Medium articles does not wrap {{ }} content in liquid tag.
+      # This will wrap do so for content that isn't in pre and code tag
+      html_doc.css("//body :not(pre):not(code)").each do |node|
+        node.inner_html = node.inner_html.gsub(/{{.*?}}/) { |liquid| "`#{liquid}`" }
+      end
+    end
+
     def parse_and_translate_youtube_iframe!(html_doc)
       html_doc.css("iframe").each do |iframe|
         if /youtube\.com/.match?(iframe.attributes["src"].value)
           iframe.name = "p"
-          youtube_id = iframe.attributes["src"].value.scan(/embed%2F(.{4,12})%3F/).flatten.first
+          youtube_id = iframe.attributes["src"].value.scan(/embed%2F(.{4,11})/).flatten.first
           iframe.keys.each { |attr| iframe.remove_attribute(attr) }
           iframe.inner_html = "{% youtube #{youtube_id} %}"
         end
@@ -117,9 +135,7 @@ class RssReader
         next unless link
 
         found_article = Article.find_by(feed_source_url: link)&.decorate
-        if found_article
-          a_tag.attributes["href"].value = found_article.url
-        end
+        a_tag.attributes["href"].value = found_article.url if found_article
       end
     end
   end

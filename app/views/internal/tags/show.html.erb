@@ -1,4 +1,6 @@
-<h1><a href="/t/<%= @tag.name %>" style="background:<%= @tag.bg_color_hex %>;color:<%= @tag.text_color_hex %>;">#<%= @tag.name %></a>, tagged <%= @tag.taggings_count %> times.</h1>
+<h1>
+  <a href="/t/<%= @tag.name %>" style="background:<%= @tag.bg_color_hex %>;color:<%= @tag.text_color_hex %>;">#<%= @tag.name %></a>, tagged <%= @tag.taggings_count %> times.
+</h1>
 <% if @tag.tag_moderator_ids.any? %>
   <p><strong>Moderators: </strong></p>
 <% else %>
@@ -6,7 +8,7 @@
 <% end %>
 <ul>
   <% @tag.tag_moderator_ids.each do |id| %>
-      <%= form_for [:internal, @tag] do |f| %>
+    <%= form_for [:internal, @tag] do |f| %>
       <li>
         <a href="/<%= User.find(id).username %>">@<%= User.find(id).username %></a>
         <%= f.hidden_field :remove_moderator_id, value: id %>
@@ -28,6 +30,15 @@
   <div>
     <%= f.label :supported %>
     <%= f.check_box :supported %>
+  </div>
+  <div>
+    <%= f.label :badge_id %>
+    <% badges_array = Badge.pluck(:title, :id) %>
+    <%= f.select(:badge_id, options_for_select([["None", nil]] + badges_array, @tag.badge_id)) %>
+  </div>
+  <div>
+    <%= f.label :category %>
+    <%= f.select(:category, options_for_select(Tag.valid_categories, @tag.category)) %>
   </div>
   <div>
     <%= f.label :alias_for %>
@@ -53,11 +64,11 @@
   </div>
   <div>
     <%= f.label :bg_color_hex %>
-    <%= f.text_field :bg_color_hex, class: "jscolor {hash:true}", required: true %>
+    <%= f.text_field :bg_color_hex, class: "color-picker", required: true %>
   </div>
   <div>
     <%= f.label :text_color_hex %>
-    <%= f.text_field :text_color_hex, class: "jscolor {hash:true}", required: true %>
+    <%= f.text_field :text_color_hex, class: "color-picker", required: true %>
   </div>
   <div>
     <%= f.submit %>

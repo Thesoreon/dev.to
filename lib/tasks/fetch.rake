@@ -1,8 +1,8 @@
 desc "This task is called by the Heroku scheduler add-on"
 
 task get_podcast_episodes: :environment do
-  Podcast.find_each do |p|
-    PodcastFeed.new.get_episodes(p, 5)
+  Podcast.published.select(:id).find_each do |podcast|
+    Podcasts::GetEpisodesJob.perform_later(podcast_id: podcast.id, limit: 5)
   end
 end
 
@@ -10,6 +10,7 @@ task periodic_cache_bust: :environment do
   cache_buster = CacheBuster.new
   cache_buster.bust("/feed.xml")
   cache_buster.bust("/badge")
+  cache_buster.bust("/shecoded")
 end
 
 task hourly_bust: :environment do
@@ -26,34 +27,23 @@ task resave_supported_tags: :environment do
   Tag.where(supported: true).find_each(&:save)
 end
 
-task renew_hired_articles: :environment do
-  Article.
-    tagged_with("hiring").
-    where("featured_number < ?", 7.days.ago.to_i + 11.minutes.to_i).
-    where(approved: true, published: true, automatically_renew: true).
-    each do |article|
-
-    if article.automatically_renew
-      article.featured_number = Time.current.to_i
-    else
-      article.approved = false
-      article.body_markdown = article.body_markdown.gsub(
-        "published: true", "published: false"
-      )
-    end
-
-    article.save
+task expire_old_listings: :environment do
+  ClassifiedListing.where("bumped_at < ?", 30.days.ago).each do |listing|
+    listing.update(published: false)
+    listing.remove_from_index!
+  end
+  ClassifiedListing.where("expires_at = ?", Time.zone.today).each do |listing|
+    listing.update(published: false)
+    listing.remove_from_index!
   end
 end
 
 task clear_memory_if_too_high: :environment do
-  if Rails.cache.stats.flatten[1]["bytes"].to_i > 9650000000
-    Rails.cache.clear
-  end
+  Rails.cache.clear if Rails.cache.stats.flatten[1]["bytes"].to_i > 9_650_000_000
 end
 
 task save_nil_hotness_scores: :environment do
-  Article.where(hotness_score: nil, published: true).find_each(&:save)
+  Article.published.where(hotness_score: nil).find_each(&:save)
 end
 
 task github_repo_fetch_all: :environment do
@@ -107,8 +97,10 @@ task remove_old_html_variant_data: :environment do
   HtmlVariantTrial.where("created_at < ?", 1.week.ago).destroy_all
   HtmlVariantSuccess.where("created_at < ?", 1.week.ago).destroy_all
   HtmlVariant.find_each do |html_variant|
-    if html_variant.html_variant_successes.size > 3
-      html_variant.calculate_success_rate!
-    end
+    html_variant.calculate_success_rate! if html_variant.html_variant_successes.any?
   end
+end
+
+task fix_credits_count_cache: :environment do
+  Credit.counter_culture_fix_counts only: %i[user organization]
 end

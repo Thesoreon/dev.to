@@ -5,7 +5,8 @@ FactoryBot.define do
   sequence(:github_username) { |n| "github#{n}" }
 
   image = Rack::Test::UploadedFile.new(
-    File.join(Rails.root, "spec", "support", "fixtures", "images", "image1.jpeg"), "image/jpeg"
+    Rails.root.join("spec", "support", "fixtures", "images", "image1.jpeg"),
+    "image/jpeg",
   )
 
   factory :user do
@@ -19,8 +20,18 @@ FactoryBot.define do
     website_url        { Faker::Internet.url }
     confirmed_at       { Time.current }
     saw_onboarding { true }
+    checked_code_of_conduct { true }
+    checked_terms_and_conditions { true }
     signup_cta_variant { "navbar_basic" }
     email_digest_periodic { false }
+
+    after(:create) do |user|
+      create(:identity, user_id: user.id)
+    end
+
+    trait :two_identities do
+      after(:create) { |user| create(:identity, user_id: user.id, provider: "twitter") }
+    end
 
     trait :super_admin do
       after(:build) { |user| user.add_role(:super_admin) }
@@ -49,24 +60,22 @@ FactoryBot.define do
       end
     end
 
-    trait :analytics do
-      after(:build) { |user| user.add_role(:analytics_beta_tester) }
+    trait :pro do
+      after(:build) { |user| user.add_role :pro }
     end
 
-    trait :org_admin do
-      after(:build) do |user|
+    trait :org_member do
+      after(:create) do |user|
         org = create(:organization)
-        user.organization_id = org.id
-        user.org_admin = true
+        create(:organization_membership, user_id: user.id, organization_id: org.id, type_of_user: "member")
       end
     end
 
-    after(:create) do |user|
-      create(:identity, user_id: user.id)
-    end
-
-    trait :two_identities do
-      after(:create) { |user| create(:identity, user_id: user.id, provider: "twitter") }
+    trait :org_admin do
+      after(:create) do |user|
+        org = create(:organization)
+        create(:organization_membership, user_id: user.id, organization_id: org.id, type_of_user: "admin")
+      end
     end
 
     trait :with_article do
@@ -90,6 +99,12 @@ FactoryBot.define do
         article = create(:article, user_id: user.id)
         create(:comment, user_id: user.id, commentable_id: article.id)
         user.update(articles_count: 1, comments_count: 1)
+      end
+    end
+
+    trait :with_pro_membership do
+      after(:create) do |user|
+        create(:pro_membership, user: user)
       end
     end
   end

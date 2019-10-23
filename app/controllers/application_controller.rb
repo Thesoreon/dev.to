@@ -2,7 +2,6 @@ class ApplicationController < ActionController::Base
   protect_from_forgery with: :exception, prepend: true
 
   include Pundit
-  include Instrumentation
 
   def require_http_auth
     authenticate_or_request_with_http_basic do |username, password|
@@ -11,7 +10,12 @@ class ApplicationController < ActionController::Base
   end
 
   def not_found
-    raise ActionController::RoutingError.new("Not Found")
+    raise ActiveRecord::RecordNotFound, "Not Found"
+  end
+
+  def not_authorized
+    render json: "Error: not authorized", status: :unauthorized
+    raise NotAuthorizedError, "Unauthorized"
   end
 
   def efficient_current_user_id
@@ -19,11 +23,11 @@ class ApplicationController < ActionController::Base
   end
 
   def authenticate_user!
-    unless current_user
-      respond_to do |format|
-        format.html { redirect_to "/enter" }
-        format.json { render json: { error: "Please sign in" }, status: 401 }
-      end
+    return if current_user
+
+    respond_to do |format|
+      format.html { redirect_to "/enter" }
+      format.json { render json: { error: "Please sign in" }, status: :unauthorized }
     end
   end
 
@@ -32,9 +36,9 @@ class ApplicationController < ActionController::Base
   end
 
   def after_sign_in_path_for(resource)
-    location = request.env["omniauth.origin"] || stored_location_for(resource) || "/dashboard"
-    context_param = resource.created_at > 40.seconds.ago ? "?newly-registered-user=true" : "?returning-user=true"
-    location + context_param
+    return "/onboarding?referrer=#{request.env['omniauth.origin'] || 'none'}" unless current_user.saw_onboarding
+
+    request.env["omniauth.origin"] || stored_location_for(resource) || "/dashboard"
   end
 
   def raise_banned
@@ -72,10 +76,5 @@ class ApplicationController < ActionController::Base
 
   def touch_current_user
     current_user.touch
-  end
-
-  def append_info_to_payload(payload)
-    super(payload)
-    append_to_honeycomb(request, self.class.name)
   end
 end

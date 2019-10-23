@@ -26,6 +26,8 @@ class DashboardManifest
     badges
     badge_achievements
     html_variants
+    sponsorships
+    pro_memberships
   ].freeze
   # DASHBOARDS = [
   #   :users,

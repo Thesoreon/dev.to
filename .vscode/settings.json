@@ -1,6 +1,11 @@
 {
-    "ruby.lint": {
-        "rubocop": true,
-        "fasterer": false,
+  "ruby.useBundler": true,
+  "ruby.useLanguageServer": true,
+  "ruby.lint": {
+    "rubocop": {
+      "useBundler": true
     }
+  },
+  "ruby.format": "rubocop",
+  "ruby.intellisense": "rubyLocate"
 }

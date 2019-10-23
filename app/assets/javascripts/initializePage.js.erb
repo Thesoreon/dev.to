@@ -13,8 +13,9 @@ function callInitalizers(){
       clearInterval(waitingForDataLoad);
       if (document.getElementsByTagName('body')[0].getAttribute('data-user-status') == "logged-in") {
         initializeBaseUserData();
+        initializeAllChatButtons();
+        initializeAllTagEditButtons();
       }
-      initializeReadingListPage();
       initializeAllFollowButts();
       initializeReadingListIcons();
       initializeSponsorshipVisibility();
@@ -26,21 +27,23 @@ function callInitalizers(){
   initializeBaseTracking();
   initializeTouchDevice();
   initializeCommentsPage();
-  initEditorResize();
-  initLeaveEditorWarning();
+  initializeArticleDate();
   initializeArticleReactions();
   initNotifications();
-  initializeSplitTestTracking();
   initializeStylesheetAppend();
+  initializeCommentDate();
   initializeCommentDropdown();
   initializeSettings();
   initializeFooterMod();
   initializeCommentPreview();
   initializeAdditionalContentBoxes();
   initializeTimeFixer();
-  if (!initializeLiveArticle.called){
-    initializeLiveArticle();
-  }
+  initializeDashboardSort();
+  initializePWAFunctionality();
+  initializeEllipsisMenu();
+  initializeArchivedPostFilter();
+  initializeCreditsPage();
+  initializeUserProfilePage();
 
   initializeDrawerSliders();
 
@@ -51,6 +54,7 @@ function callInitalizers(){
   nextPage = 0;
   fetching = false;
   done = false;
+  adClicked = false;
   setTimeout(function(){
     done = false;
   },300);

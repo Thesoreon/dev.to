@@ -4,10 +4,9 @@ module Api
       def create
         return unless user_signed_in?
 
-        user_ids = JSON.parse(params[:users]).map { |h| h["id"] }
-        users = User.where(id: user_ids)
-        users.each do |user|
-          current_user.delay.follow(user)
+        user_ids = params[:users].map { |h| h["id"] }
+        user_ids.each do |user_id|
+          Users::FollowJob.perform_later(current_user.id, user_id, "User")
         end
         render json: { outcome: "followed 50 users" }
       end

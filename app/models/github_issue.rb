@@ -1,32 +1,30 @@
 class GithubIssue < ApplicationRecord
   serialize :issue_serialized, Hash
-  validates :category, inclusion: { in: %w(issue issue_comment) }
+  validates :category, inclusion: { in: %w[issue issue_comment] }
 
   def self.find_or_fetch(url)
-    find_by_url(url) || fetch(url)
+    find_by(url: url) || fetch(url)
   end
 
   def self.fetch(url)
     try_to_get_issue(url)
   rescue StandardError => e
-    if e.message.include?("404 - Not Found")
-      raise StandardError, "A GitHub issue 404'ed and could not be found!"
-    else
-      raise StandardError, e.message
-    end
+    raise StandardError, "A GitHub issue 404'ed and could not be found!" if e.message.include?("404 - Not Found")
+
+    raise StandardError, e.message
   end
 
   def self.try_to_get_issue(url)
     client = Octokit::Client.new(access_token: random_token)
     issue = GithubIssue.new(url: url)
-    if !!(url !~ /\/issues\/comments/)
-      repo, issue_id = url.gsub(/.*github\.com\/repos\//, "").split(issue_or_pull(url))
-      issue.issue_serialized = get_issue_serialized(client, repo, issue_id)
-      issue.category = "issue"
-    else
+    if /\/issues\/comments/.match?(url)
       repo, issue_id = url.gsub(/.*github\.com\/repos\//, "").split("/issues/comments/")
       issue.issue_serialized = client.issue_comment(repo, issue_id).to_hash
       issue.category = "issue_comment"
+    else
+      repo, issue_id = url.gsub(/.*github\.com\/repos\//, "").split(issue_or_pull(url))
+      issue.issue_serialized = get_issue_serialized(client, repo, issue_id)
+      issue.category = "issue"
     end
     issue.processed_html = get_html(client, issue)
     issue.save!

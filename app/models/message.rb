@@ -22,25 +22,7 @@ class Message < ApplicationRecord
   end
 
   def send_push
-    receiver_ids = chat_channel.chat_channel_memberships.
-      where.not(user_id: user.id).pluck(:user_id)
-
-    PushNotificationSubscription.where(user_id: receiver_ids).find_each do |sub|
-      return if no_push_necessary?(sub)
-
-      Webpush.payload_send(
-        endpoint: sub.endpoint,
-        message: ActionView::Base.full_sanitizer.sanitize(message_html),
-        p256dh: sub.p256dh_key,
-        auth: sub.auth_key,
-        ttl: 24 * 60 * 60,
-        vapid: {
-          subject: "https://dev.to",
-          public_key: ApplicationConfig["VAPID_PUBLIC_KEY"],
-          private_key: ApplicationConfig["VAPID_PRIVATE_KEY"]
-        },
-      )
-    end
+    Messages::SendPushJob.perform_later(user.id, chat_channel.id, message_html)
   end
 
   def direct_receiver
@@ -54,7 +36,9 @@ class Message < ApplicationRecord
   def update_chat_channel_last_message_at
     chat_channel.touch(:last_message_at)
     chat_channel.index!
-    chat_channel.delay.index!
+    chat_channel.chat_channel_memberships.reindex!
+
+    ChatChannels::IndexJob.perform_later(chat_channel_id: chat_channel.id)
   end
 
   def update_all_has_unopened_messages_statuses
@@ -75,9 +59,9 @@ class Message < ApplicationRecord
   def append_rich_links(html)
     doc = Nokogiri::HTML(html)
     rich_style = "border: 1px solid #0a0a0a; border-radius: 3px; padding: 8px;"
-    doc.css("a").each do |a|
-      if article = rich_link_article(a)
-        html = html + "<a style='color: #0a0a0a' href='#{article.path}'
+    doc.css("a").each do |anchor|
+      if (article = rich_link_article(anchor))
+        html += "<a style='color: #0a0a0a' href='#{article.path}'
           target='_blank' data-content='articles/#{article.id}'>
           <h1 style='#{rich_style}'  data-content='articles/#{article.id}'>
           #{article.title}</h1></a>".html_safe
@@ -87,36 +71,25 @@ class Message < ApplicationRecord
   end
 
   def channel_permission
-    if chat_channel_id.blank?
-      errors.add(:base, "Must be part of channel.")
-    end
+    errors.add(:base, "Must be part of channel.") if chat_channel_id.blank?
 
     channel = ChatChannel.find(chat_channel_id)
     return if channel.open?
 
-    unless channel.has_member?(user)
-      errors.add(:base, "You are not a participant of this chat channel.")
-    end
-  end
-
-  def no_push_necessary?(sub)
-    membership = sub.user.chat_channel_memberships.order("last_opened_at DESC").first
-    membership.last_opened_at > 40.seconds.ago
+    errors.add(:base, "You are not a participant of this chat channel.") unless channel.has_member?(user)
   end
 
   def rich_link_article(link)
-    if link["href"].include?("//#{ApplicationConfig['APP_DOMAIN']}/") && link["href"].split("/")[4]
-      Article.find_by_slug(link["href"].split("/")[4].split("?")[0])
-    end
+    Article.find_by(slug: link["href"].split("/")[4].split("?")[0]) if link["href"].include?("//#{ApplicationConfig['APP_DOMAIN']}/") && link["href"].split("/")[4]
   end
 
   def send_email_if_appropriate
     recipient = direct_receiver
     return if !chat_channel.direct? ||
-      recipient.updated_at > 2.hours.ago ||
+      recipient.updated_at > 1.hour.ago ||
       recipient.chat_channel_memberships.order("last_opened_at DESC").
-        first.last_opened_at > 18.hours.ago ||
-      chat_channel.last_message_at > 45.minutes.ago ||
+        first.last_opened_at > 15.hours.ago ||
+      chat_channel.last_message_at > 30.minutes.ago ||
       recipient.email_connect_messages == false
 
     NotifyMailer.new_message_email(self).deliver

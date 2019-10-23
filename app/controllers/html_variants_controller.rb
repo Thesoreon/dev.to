@@ -4,27 +4,29 @@ class HtmlVariantsController < ApplicationController
   def index
     authorize HtmlVariant
     @html_variants = if params[:state] == "mine"
-                       current_user.html_variants.order("created_at DESC").includes(:user).page(params[:page]).per(15)
+                       current_user.html_variants.order("created_at DESC").includes(:user).page(params[:page]).per(30)
                      elsif params[:state] == "admin"
-                       HtmlVariant.where(published: true, approved: false).order("created_at DESC").includes(:user).page(params[:page]).per(15)
+                       HtmlVariant.where(published: true, approved: false).order("created_at DESC").includes(:user).page(params[:page]).per(30)
+                     elsif params[:state].present?
+                       HtmlVariant.where(published: true, approved: true, group: params[:state]).order("success_rate DESC").includes(:user).page(params[:page]).per(30)
                      else
-                       HtmlVariant.where(published: true, approved: true).order("success_rate DESC").includes(:user).page(params[:page]).per(15)
+                       HtmlVariant.where(published: true, approved: true).order("success_rate DESC").includes(:user).page(params[:page]).per(30)
                      end
   end
 
   def new
     authorize HtmlVariant
     @html_variant = HtmlVariant.new
-    if params[:fork_id]
-      @fork = HtmlVariant.find(params[:fork_id])
-      @html_variant.name = @fork.name + " FORK-#{rand(10000)}"
-      @html_variant.html = @fork.html
-    end
+    return unless params[:fork_id]
+
+    @fork = HtmlVariant.find(params[:fork_id])
+    @html_variant.name = @fork.name + " FORK-#{rand(10_000)}"
+    @html_variant.html = @fork.html
   end
 
   def show
     @story_show = true
-    @@article_show = true
+    @article_show = true
     @html_variant = HtmlVariant.find(params[:id])
     authorize @html_variant
     render layout: false

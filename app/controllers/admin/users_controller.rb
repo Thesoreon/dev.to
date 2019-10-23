@@ -2,7 +2,6 @@ module Admin
   class UsersController < Admin::ApplicationController
     def update
       user = User.find(params[:id])
-      UserRoleService.new(user, current_user.id).check_for_roles(params[:user])
       if user.errors.messages.blank? && user.update(user_params)
         flash[:notice] = "User successfully updated"
         redirect_to "/admin/users/#{params[:id]}"
@@ -50,9 +49,18 @@ module Admin
         medium_url
         gitlab_url
         linkedin_url
+        twitch_url
+        instagram_url
       ]
-      accessible << %i[password password_confirmation] unless params[:user][:password].blank?
-      params.require(:user).permit(accessible)
+      accessible << %i[password password_confirmation] if params[:user][:password].present?
+      verify_usernames params.require(:user).permit(accessible)
+    end
+
+    # make sure usernames are not empty, to be able to use the database unique index
+    def verify_usernames(user_params)
+      user_params[:twitter_username] = nil if user_params[:twitter_username] == ""
+      user_params[:github_username] = nil if user_params[:github_username] == ""
+      user_params
     end
   end
 end

@@ -13,9 +13,9 @@ RSpec.describe Comment, type: :model do
   end
 
   describe "validations" do
-    subject { Comment.new(commentable: article) }
+    subject { described_class.new(user: user, commentable: article) }
 
-    let(:article) { Article.new }
+    let(:article) { Article.new(user: user2) }
 
     before do
       allow(article).to receive(:touch).and_return(true)
@@ -25,20 +25,22 @@ RSpec.describe Comment, type: :model do
     it { is_expected.to belong_to(:commentable) }
     it { is_expected.to have_many(:reactions).dependent(:destroy) }
     it { is_expected.to have_many(:mentions).dependent(:destroy) }
+    it { is_expected.to have_many(:notifications).dependent(:delete_all) }
+    it { is_expected.to have_many(:notification_subscriptions).dependent(:destroy) }
     it { is_expected.to validate_presence_of(:commentable_id) }
 
     it { is_expected.to validate_presence_of(:body_markdown) }
     it { is_expected.to validate_uniqueness_of(:body_markdown).scoped_to(:user_id, :ancestry, :commentable_id, :commentable_type) }
-    it { is_expected.to validate_length_of(:body_markdown).is_at_least(1).is_at_most(25000) }
-    it { is_expected.to validate_inclusion_of(:commentable_type).in_array(%w(Article PodcastEpisode)) }
+    it { is_expected.to validate_length_of(:body_markdown).is_at_least(1).is_at_most(25_000) }
+    it { is_expected.to validate_inclusion_of(:commentable_type).in_array(%w[Article PodcastEpisode]) }
   end
 
   it "gets proper generated ID code" do
-    comment = Comment.new(id: 1)
+    comment = described_class.new(id: 1)
     expect(comment.id_code_generated).to eq(comment.id.to_s(26))
   end
 
-  xit "generates character count before saving" do
+  it "generates character count before saving" do
     expect(comment.markdown_character_count).to eq(comment.body_markdown.size)
   end
 
@@ -50,7 +52,6 @@ RSpec.describe Comment, type: :model do
     end
   end
 
-  # rubocop:disable RSpec/ExampleLength
   it "adds timestamp url if commentable has video and timestamp" do
     video_comment.body_markdown = "I like the part at 4:30"
     video_comment.save
@@ -69,12 +70,17 @@ RSpec.describe Comment, type: :model do
     expect(video_comment.processed_html.include?(">1:52:30</a>")).to eq(true)
     expect(video_comment.processed_html.include?(">1:20</a>")).to eq(true)
   end
-  # rubocop:enable RSpec/ExampleLength
 
   it "does not add timestamp if commentable does not have video" do
     comment.body_markdown = "I like the part at 1:52:30 and 1:20"
     comment.save
     expect(comment.processed_html.include?(">1:52:30</a>")).to eq(false)
+  end
+
+  it "adds rel=nofollow to links" do
+    comment.body_markdown = "this is a comment with a link: http://dev.to"
+    comment.save
+    expect(comment.processed_html.include?('rel="nofollow"')).to eq(true)
   end
 
   it "adds a mention url if user is mentioned like @mention" do
@@ -118,8 +124,7 @@ RSpec.describe Comment, type: :model do
   end
 
   it "shortens long urls" do
-    comment.body_markdown = "Hello https://longurl.com/dsjkdsdsjdsdskhjdsjbhkdshjdshudsdsbhdsbiudsuidsuidsuidsuidsuidsuidsiudsiudsuidsuisduidsuidsiuiuweuiweuiewuiweuiweuiew?sdhiusduisduidsiudsuidsiusdiusdiuewiuewiuewiuweiuweiuweiuewiuweuiweuiewibsdiubdsiubdsisbdiudsbsdiusdbiu" # rubocop:disable Metrics/LineLength
-    comment.save
+    comment.update(body_markdown: "Hello https://longurl.com/#{'x' * 100}?#{'y' * 100}")
     expect(comment.processed_html.include?("...</a>")).to eq(true)
     expect(comment.processed_html.size).to be < 450
   end
@@ -129,7 +134,7 @@ RSpec.describe Comment, type: :model do
   end
 
   it "shows year in readable time if not current year" do
-    comment.created_at = 1.years.ago
+    comment.created_at = 1.year.ago
     last_year = 1.year.ago.year % 100
     expect(comment.readable_publish_date.include?("'#{last_year}")).to eq(true)
   end
@@ -169,9 +174,25 @@ RSpec.describe Comment, type: :model do
       expect(comment.title.length).to be <= 80
     end
 
+    it "is allows title of greater length if passed" do
+      expect(comment.title(5).length).to eq(5)
+    end
+
     it "retains content from #processed_html" do
-      text = comment.title.gsub("...", "").gsub(/\n/, "")
+      comment.update_column(:processed_html, "Hello this is a post.") # Remove randomness
+      text = comment.title.gsub("...", "").delete("\n")
       expect(comment.processed_html).to include CGI.unescapeHTML(text)
+    end
+
+    it "is converted to deleted if the comment is deleted" do
+      comment.update_column(:deleted, true)
+      expect(comment.title).to eq "[deleted]"
+    end
+
+    it "does not contain the wrong encoding" do
+      comment.body_markdown = "It's the best post ever. It's so great."
+      comment.save
+      expect(comment.title).not_to include "&#39;"
     end
   end
 
@@ -211,6 +232,74 @@ RSpec.describe Comment, type: :model do
     it "returns part of the tree" do
       comments = described_class.tree_for(article2, 1)
       expect(comments).to eq(tree_comment => { child => {} })
+    end
+  end
+
+  describe "deleted" do
+    let(:child_comment) { create(:comment, commentable: article, parent: comment, user: user) }
+
+    it "deletes the comment's notifications" do
+      create(:notification, notifiable: comment, user: user2)
+      create(:notification, notifiable: child_comment, user: user)
+      perform_enqueued_jobs do
+        child_comment.update(deleted: true)
+        expect(child_comment.notifications).to be_empty
+      end
+    end
+
+    it "updates the notifications of the ancestors and descendants" do
+      create(:notification, notifiable: comment, user: user2)
+      create(:notification, notifiable: child_comment, user: user)
+      perform_enqueued_jobs do
+        comment.update(deleted: true)
+        expect(child_comment.notifications.first.json_data["comment"]["ancestors"][0]["title"]).to eq "[deleted]"
+      end
+    end
+  end
+
+  describe "when algolia auto-indexing/removal is triggered" do
+    context "when destroying" do
+      it "doesn't schedule an ActiveJob on destroy" do
+        comment = create(:comment, commentable: article)
+        expect do
+          comment.destroy
+        end.not_to have_enqueued_job.on_queue("algoliasearch")
+      end
+    end
+
+    context "when record.deleted == false" do
+      it "checks auto-indexing" do
+        expect do
+          create(:comment, user_id: user2.id, commentable_id: article.id)
+        end.to have_enqueued_job.with(kind_of(described_class), "index!").on_queue("algoliasearch")
+      end
+    end
+
+    context "when record.deleted == true" do
+      it "checks auto-indexing" do
+        comment.deleted = true
+        expect do
+          comment.save!
+        end.to have_enqueued_job.with(kind_of(described_class), "remove_algolia_index").on_queue("algoliasearch")
+      end
+    end
+  end
+
+  describe "when a comment is destroyed" do
+    it "updates user last comment date" do
+      expect do
+        comment.destroy
+        user2.reload
+      end.to change(user2, :last_comment_at)
+    end
+  end
+
+  describe "when a comment is created" do
+    it "updates user last comment date" do
+      expect do
+        comment.save
+        user2.reload
+      end.to change(user2, :last_comment_at)
     end
   end
 

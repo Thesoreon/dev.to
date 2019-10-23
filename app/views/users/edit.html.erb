@@ -1,8 +1,8 @@
 <% title "Settings" %>
 
-<% if flash[:notice] && flash[:notice].include?("Your ") %>
+<% if flash[:settings_notice] %>
   <div class="notice" id="notice">
-    <%= flash[:notice] %>
+    <%= flash[:settings_notice] %>
   </div>
 <% end %>
 
@@ -14,13 +14,27 @@
 
 <% if params[:state] == "previous-registration" %>
   <div class="notice error-notice" id="notice">
-    There is an existing account authorized with that social account. Contact <a href="mailto:yo@dev.to">yo@dev.to</a> if this is a mistake.
+    There is an existing account authorized with that social account. Contact
+    <a href="mailto:yo@dev.to">yo@dev.to</a> if this is a mistake.
   </div>
 <% end %>
 
 <div class="user-settings-page">
-  <% if @tab == "organization" && @user.organization.present? %>
-    <h2>Settings for <a href="/<%= @user.organization.slug %>">@<%= @user.organization.slug %></a></h2>
+  <% if @tab == "organization" && @organizations.present? %>
+    <h2>Settings for
+      <span class="organization-dropdown">
+        <select id="organization-dropdown-select" onchange="window.location.href=this.value">
+          <% options = @organizations.pluck(:slug, :id).each do |arr| %>
+            <% arr[0] = "@#{arr[0]}" %>
+            <% arr[1] = "/settings/organization/#{arr[1]}" %>
+          <% end.to_h.merge("New Organization" => "/settings/organization/new") %>
+          <%= options_for_select(options, "/settings/organization/#{params[:org_id]}") %>
+          <%# For example: %>
+          <%# <option value="/settings/organization/1>@devteam</option> %>
+          <%# <option value="/settings/organization/new" selected>New Organization</option> %>
+        </select>
+      </span>
+    </h2>
   <% else %>
     <h2>Settings for <a href="/<%= @user.username %>">@<%= @user.username %></a></h2>
   <% end %>
@@ -42,7 +56,8 @@
     <div class="field-notice">
       Email Verification
       <div class="small">
-        you have requested a change to <a href="mailto:<%= @user.unconfirmed_email %>"><%= @user.unconfirmed_email %></a><br />
+        you have requested a change to
+        <a href="mailto:<%= @user.unconfirmed_email %>"><%= @user.unconfirmed_email %></a><br />
         check your inbox for the verification link to finalize the change.
       </div>
     </div>
@@ -74,16 +89,18 @@
 
   <div class="settings-hub">
     <% @tab_list.each do |possible_tab| %>
-      <% if @tab == possible_tab.downcase.gsub(" ","-") %>
+      <% if @tab == possible_tab.downcase.tr(" ", "-") %>
         <div class="single-settings-tab selected">
           <%= possible_tab %>
         </div>
       <% else %>
-        <a class="single-settings-tab" href="/settings/<%= possible_tab.downcase.gsub(" ", "-") %>"><%= possible_tab %></a>
+        <a class="single-settings-tab" href="/settings/<%= possible_tab.downcase.tr(" ", "-") %>">
+          <%= possible_tab %>
+        </a>
       <% end %>
     <% end %>
   </div>
   <div class="settings-form">
-    <%= render "users/" + @tab.gsub("-", "_"), tab: @tab %>
+    <%= render "users/" + @tab.tr("-", "_"), tab: @tab %>
   </div>
 </div>

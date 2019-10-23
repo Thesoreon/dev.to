@@ -1,11 +1,13 @@
 <style>
-body {
-all: unset;
-}
+  body {
+    all: unset;
+  }
 </style>
 <%= render "layouts/styles" %>
 <style>
-  body{padding-top: 20px !important; }
+  body {
+    padding-top: 20px !important;
+  }
 </style>
 <% if @html_variant.group == "article_show_below_article_cta" %>
   <div class="home">
@@ -14,7 +16,7 @@ all: unset;
     </div>
   </div>
 <% else %>
-  <div class="primary-sticky-nav">
+  <div style="width: 310px">
     <div class="html-variant-wrapper">
       <%= @html_variant.html.html_safe %>
     </div>

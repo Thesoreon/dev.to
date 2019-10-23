@@ -10,7 +10,8 @@ class MailchimpBot
   def upsert
     return true unless Rails.env.production? || Rails.env.test?
 
-    upsert_to_membership_newsletter
+    manage_community_moderator_list
+    manage_tag_moderator_list
     upsert_to_newsletter
   end
 
@@ -45,21 +46,13 @@ class MailchimpBot
     success
   end
 
-  def upsert_to_membership_newsletter
-    return false unless a_sustaining_member?
+  def manage_community_moderator_list
+    return false unless user.has_role?(:trusted)
 
     success = false
-    # !!! user.monthly_due = 0 ? unsubscibe
-    tiers = %i[ triple_unicorn_member
-                level_4_member
-                level_3_member
-                level_2_member
-                level_1_member]
-    membership = tiers.each { |t| break t if user.has_role?(t) }
-    status = user.email_membership_newsletter ? "subscribed" : "unsubscribed"
-
+    status = user.email_community_mod_newsletter ? "subscribed" : "unsubscribed"
     begin
-      gibbon.lists(ApplicationConfig["MAILCHIMP_SUSTAINING_MEMBERS_ID"]).members(target_md5_email).upsert(
+      gibbon.lists(ApplicationConfig["MAILCHIMP_COMMUNITY_MODERATORS_ID"]).members(target_md5_email).upsert(
         body: {
           email_address: user.email,
           status: status,
@@ -68,8 +61,7 @@ class MailchimpBot
             USERNAME: user.username.to_s,
             TWITTER: user.twitter_username.to_s,
             GITHUB: user.github_username.to_s,
-            IMAGE_URL: user.profile_image_url.to_s,
-            MEMBERSHIP: membership.to_s
+            IMAGE_URL: user.profile_image_url.to_s
           }
         },
       )
@@ -80,6 +72,64 @@ class MailchimpBot
     success
   end
 
+  def manage_tag_moderator_list
+    return false unless user.tag_moderator?
+
+    success = false
+    tags = user.roles.where(name: "tag_moderator").map { |tag| Tag.find(tag.resource_id).name }
+    status = user.email_tag_mod_newsletter ? "subscribed" : "unsubscribed"
+    begin
+      gibbon.lists(ApplicationConfig["MAILCHIMP_TAG_MODERATORS_ID"]).members(target_md5_email).upsert(
+        body: {
+          email_address: user.email,
+          status: status,
+          merge_fields: {
+            NAME: user.name.to_s,
+            USERNAME: user.username.to_s,
+            TWITTER: user.twitter_username.to_s,
+            GITHUB: user.github_username.to_s,
+            IMAGE_URL: user.profile_image_url.to_s,
+            TAGS: tags.join(", ")
+          }
+        },
+      )
+      success = true
+    rescue Gibbon::MailChimpError => e
+      report_error(e)
+    end
+    success
+  end
+
+  def unsub_sustaining_member
+    return unless user.tag_moderator?
+
+    gibbon.lists(ApplicationConfig["MAILCHIMP_TAG_MODERATORS_ID"]).members(target_md5_email).update(
+      body: {
+        status: "unsubscribed"
+      },
+    )
+  end
+
+  def unsub_community_mod
+    return unless user.has_role?(:trusted)
+
+    gibbon.lists(ApplicationConfig["MAILCHIMP_COMMUNITY_MODERATORS_ID"]).members(target_md5_email).update(
+      body: {
+        status: "unsubscribed"
+      },
+    )
+  end
+
+  def unsub_tag_mod
+    return unless a_sustaining_member?
+
+    gibbon.lists(ApplicationConfig["MAILCHIMP_SUSTAINING_MEMBERS_ID"]).members(target_md5_email).update(
+      body: {
+        status: "unsubscribed"
+      },
+    )
+  end
+
   def unsubscribe_all_newsletters
     success = false
     begin
@@ -88,13 +138,9 @@ class MailchimpBot
           status: "unsubscribed"
         },
       )
-      if a_sustaining_member?
-        gibbon.lists(ApplicationConfig["MAILCHIMP_SUSTAINING_MEMBERS_ID"]).members(target_md5_email).update(
-          body: {
-            status: "unsubscribed"
-          },
-        )
-      end
+      unsub_tag_mod
+      unsub_sustaining_member
+      unsub_community_mod
       success = true
     rescue Gibbon::MailChimpError => e
       report_error(e)

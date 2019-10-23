@@ -1,30 +1,29 @@
 class JSFiddleTag < LiquidTagBase
+  PARTIAL = "liquids/jsfiddle".freeze
+  OPTION_REGEXP = /\A(js|html|css|result|,)*\z/.freeze
+  LINK_REGEXP = /\A(http|https):\/\/(jsfiddle\.net)\/[a-zA-Z0-9\-\/]*\z/.freeze
+
   def initialize(tag_name, link, tokens)
     super
     @link = parse_link(link)
     @build_options = parse_options(link)
-    @height = 600
   end
 
   def render(_context)
-    html = <<-HTML
-      <iframe
-        src="#{@link}/embedded/#{@build_options}/dark"
-        width="100%"
-        height="#{@height}"
-        scrolling="no"
-        frameborder="no"
-        allowfullscreen
-        allowtransparency="true">
-      </iframe>
-    HTML
-    finalize_html(html)
+    ActionController::Base.new.render_to_string(
+      partial: PARTIAL,
+      locals: {
+        link: @link,
+        build_options: @build_options,
+        height: 600
+      },
+    )
   end
 
   private
 
   def valid_option(option)
-    option.match(/^(js|html|css|result|,)*\z/)
+    option.match(OPTION_REGEXP)
   end
 
   def parse_options(input)
@@ -32,7 +31,7 @@ class JSFiddleTag < LiquidTagBase
     _, *options = stripped_link.split(" ")
 
     # Validation
-    validated_options = options.map { |o| valid_option(o) }.reject { |e| e == nil }
+    validated_options = options.map { |option| valid_option(option) }.reject(&:nil?)
     raise StandardError, "Invalid Options" unless options.empty? || !validated_options.empty?
 
     validated_options.length.zero? ? "" : validated_options.join(",").concat("/")
@@ -48,7 +47,7 @@ class JSFiddleTag < LiquidTagBase
 
   def valid_link?(link)
     link_no_space = link.delete(" ")
-    (link_no_space =~ /^(http|https):\/\/(jsfiddle\.net)\/[a-zA-Z0-9\-\/]*\z/).zero?
+    (link_no_space =~ LINK_REGEXP).zero?
   end
 end
 

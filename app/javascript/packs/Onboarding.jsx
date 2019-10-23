@@ -10,23 +10,10 @@ HTMLDocument.prototype.ready = new Promise(resolve => {
   return null;
 });
 
-function isUserSignedIn() {
-  return (
-    document.head.querySelector(
-      'meta[name="user-signed-in"][content="true"]',
-    ) !== null
-  );
-}
-
 function renderPage() {
-  import('../src/Onboarding')
+  import('../onboarding/Onboarding')
     .then(({ default: Onboarding }) => {
-      let waitingForOnboarding = setInterval(function(){
-        if (document.getElementById("main-head-stylesheet")) {
-          render(<Onboarding />, document.getElementById('top-bar'))
-          clearInterval(waitingForOnboarding);
-        }
-      }, 3)
+      render(<Onboarding />, document.getElementById('onboarding-container'));
     })
     .catch(error => {
       // eslint-disable-next-line no-console
@@ -41,10 +28,7 @@ document.ready.then(
       window.csrfToken = csrfToken;
 
       getUnopenedChannels();
-
-      if (isUserSignedIn() && !currentUser.saw_onboarding) {
-        renderPage();
-      }
+      renderPage();
     })
     .catch(error => {
       // eslint-disable-next-line no-console

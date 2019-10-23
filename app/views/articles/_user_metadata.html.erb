@@ -13,7 +13,7 @@
             headquarters
           </div>
           <div class="value">
-            <%= @organization.location %>
+            <%= sanitize @organization.location %>
           </div>
         </div>
       <% end %>
@@ -33,18 +33,19 @@
             support_email
           </div>
           <div class="value">
-            <a href="mailto:<%= @organization.email %>"><%= @organization.email %></a>
+            <a href="mailto:<%= sanitize @organization.email %>"><%= sanitize @organization.email %></a>
           </div>
         </div>
       <% end %>
     <% else %>
 
       <% if @user.email_public &&
-        @user.employer_name.present? &&
-        @user.location.present? &&
-        @user.education.present? &&
-        @user.education.size > 25 &&
-        @user.summary.to_s.size < 145 %>
+          @user.employer_name.present? &&
+          @user.location.present? &&
+          @user.education.present? &&
+          @user.education.size > 25 &&
+          @user.summary.to_s.size < 145
+          %>
         <style>
           .user-profile-header {
             min-height: 398px;

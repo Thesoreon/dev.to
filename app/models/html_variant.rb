@@ -3,7 +3,7 @@ class HtmlVariant < ApplicationRecord
 
   validates :html, presence: true
   validates :name, uniqueness: true
-  validates :group, inclusion: { in: %w(article_show_sidebar_cta article_show_below_article_cta badge_landing_page) }
+  validates :group, inclusion: { in: %w[article_show_sidebar_cta article_show_below_article_cta badge_landing_page] }
   validates :success_rate, presence: true
   validate  :no_edits
   belongs_to :user, optional: true
@@ -30,15 +30,13 @@ class HtmlVariant < ApplicationRecord
   end
 
   def self.find_random_for_test(tags_array, group)
-    where(group: group, approved: true, published: true, target_tag: tags_array).order("RANDOM()").first
+    where(group: group, approved: true, published: true, target_tag: tags_array).order(Arel.sql("RANDOM()")).first
   end
 
   private
 
   def no_edits
-    if (approved && (html_changed? || name_changed? || group_changed?)) && persisted?
-      errors.add(:base, "cannot change once published and approved")
-    end
+    errors.add(:base, "cannot change once published and approved") if (approved && (html_changed? || name_changed? || group_changed?)) && persisted?
   end
 
   def prefix_all_images
@@ -79,12 +77,12 @@ class HtmlVariant < ApplicationRecord
                 "auto"
               end
     cl_image_path(source,
-      type: "fetch",
-      width: width,
-      crop: "limit",
-      quality: quality,
-      flags: "progressive",
-      fetch_format: "auto",
-      sign_url: true).gsub(",", "%2C")
+                  type: "fetch",
+                  width: width,
+                  crop: "limit",
+                  quality: quality,
+                  flags: "progressive",
+                  fetch_format: "auto",
+                  sign_url: true).gsub(",", "%2C")
   end
 end

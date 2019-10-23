@@ -8,7 +8,7 @@ RSpec.describe "FollowsApi", type: :request do
     let(:user4) { create(:user) }
     let(:user5) { create(:user) }
     let(:users_hash) do
-      [{ id: user2.id }, { id: user3.id }, { id: user4.id }, { id: user5.id }].to_json
+      [{ id: user2.id }, { id: user3.id }, { id: user4.id }, { id: user5.id }]
     end
 
     it "returns empty if user not signed in" do
@@ -24,10 +24,10 @@ RSpec.describe "FollowsApi", type: :request do
 
     it "creates follows" do
       sign_in user
-      run_background_jobs_immediately do
+      perform_enqueued_jobs do
         post "/api/follows", params: { users: users_hash }
       end
-      expect(Follow.all.size).to eq(JSON.parse(users_hash).size)
+      expect(Follow.all.size).to eq(users_hash.size)
     end
   end
 end

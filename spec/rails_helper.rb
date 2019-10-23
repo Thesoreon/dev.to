@@ -12,6 +12,7 @@ require "pundit/matchers"
 require "pundit/rspec"
 require "webmock/rspec"
 require "test_prof/recipes/rspec/before_all"
+require "test_prof/recipes/rspec/let_it_be"
 
 # Requires supporting ruby files with custom matchers and macros, etc, in
 # spec/support/ and its subdirectories. Files matching `spec/**/*_spec.rb` are
@@ -26,24 +27,48 @@ require "test_prof/recipes/rspec/before_all"
 # directory. Alternatively, in the individual `*_spec.rb` files, manually
 # require only the support files necessary.
 
-Dir[Rails.root.join("spec/support/**/*.rb")].each { |f| require f }
-Dir[Rails.root.join("spec/features/shared_examples/**/*.rb")].each { |f| require f }
-Dir[Rails.root.join("spec/models/shared_examples/**/*.rb")].each { |f| require f }
+Dir[Rails.root.join("spec", "support", "**", "*.rb")].each { |f| require f }
+Dir[Rails.root.join("spec", "system", "shared_examples", "**", "*.rb")].each { |f| require f }
+Dir[Rails.root.join("spec", "models", "shared_examples", "**", "*.rb")].each { |f| require f }
+Dir[Rails.root.join("spec", "jobs", "shared_examples", "**", "*.rb")].each { |f| require f }
 
 # Checks for pending migrations before tests are run.
 # If you are not using ActiveRecord, you can remove this line.
 ActiveRecord::Migration.maintain_test_schema!
 
 # Disable internet connection with Webmock
-WebMock.disable_net_connect!(allow_localhost: true)
+# allow browser websites, so that "webdrivers" can access their binaries
+# see <https://github.com/titusfortner/webdrivers/wiki/Using-with-VCR-or-WebMock>
+allowed_sites = [
+  "https://chromedriver.storage.googleapis.com",
+  "https://github.com/mozilla/geckodriver/releases",
+  "https://selenium-release.storage.googleapis.com",
+  "https://developer.microsoft.com/en-us/microsoft-edge/tools/webdriver",
+]
+WebMock.disable_net_connect!(allow_localhost: true, allow: allowed_sites)
+
+# tell VCR to ignore browsers download sites
+# see <https://github.com/titusfortner/webdrivers/wiki/Using-with-VCR-or-WebMock>
+VCR.configure do |config|
+  config.ignore_hosts(
+    "chromedriver.storage.googleapis.com",
+    "github.com/mozilla/geckodriver/releases",
+    "selenium-release.storage.googleapis.com",
+    "developer.microsoft.com/en-us/microsoft-edge/tools/webdriver",
+  )
+end
+
+RSpec::Matchers.define_negated_matcher :not_change, :change
 
 RSpec.configure do |config|
+  config.use_transactional_fixtures = true
   config.fixture_path = "#{::Rails.root}/spec/fixtures"
 
   config.include ApplicationHelper
-  config.include Devise::Test::ControllerHelpers, type: :controller
+  config.include ActionMailer::TestHelper
+  config.include ActiveJob::TestHelper
   config.include Devise::Test::ControllerHelpers, type: :view
-  config.include Devise::Test::IntegrationHelpers, type: :feature
+  config.include Devise::Test::IntegrationHelpers, type: :system
   config.include Devise::Test::IntegrationHelpers, type: :request
   config.include FactoryBot::Syntax::Methods
   config.include OmniauthMacros
@@ -65,7 +90,7 @@ RSpec.configure do |config|
   if config.filter_manager.inclusions.rules.include?(:live)
     WebMock.allow_net_connect!
     StripeMock.toggle_live(true)
-    puts "Running **live** tests against Stripe..."
+    Rails.logger.info("Running **live** tests against Stripe...")
   end
 
   config.before do
@@ -86,6 +111,7 @@ RSpec.configure do |config|
   end
 
   OmniAuth.config.test_mode = true
+  OmniAuth.config.logger = Rails.logger
 
   config.infer_spec_type_from_file_location!
 
@@ -93,4 +119,9 @@ RSpec.configure do |config|
   config.filter_rails_from_backtrace!
   # arbitrary gems may also be filtered via:
   # config.filter_gems_from_backtrace("gem name")
+end
+
+Doorkeeper.configure do
+  # hash_token_secrets on its own won't work in test
+  hash_token_secrets fallback: :plain
 end

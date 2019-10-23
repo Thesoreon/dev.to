@@ -1,6 +1,6 @@
 class EmailLogic
   attr_reader :open_percentage, :last_email_sent_at,
-    :days_until_next_email, :articles_to_send
+              :days_until_next_email, :articles_to_send
 
   def initialize(user)
     @user = user
@@ -16,9 +16,7 @@ class EmailLogic
     @open_percentage = get_open_rate
     @days_until_next_email = get_days_until_next_email
     @ready_to_receive_email = get_user_readiness
-    if @ready_to_receive_email
-      @articles_to_send = get_articles_to_send
-    end
+    @articles_to_send = get_articles_to_send if @ready_to_receive_email
     self
   end
 
@@ -38,19 +36,17 @@ class EmailLogic
                    where("score > ?", 12).
                    where("experience_level_rating > ? AND experience_level_rating < ?", (@user.experience_level || 5) - 3.6, (@user.experience_level || 5) + 3.6).
                    order("score DESC").
-                   limit(6)
+                   limit(8)
                else
-                 Article.
+                 Article.published.
                    where("published_at > ?", fresh_date).
-                   where(published: true, featured: true, email_digest_eligible: true).
+                   where(featured: true, email_digest_eligible: true).
                    where.not(user_id: @user.id).
                    where("score > ?", 25).
                    order("score DESC").
-                   limit(6)
+                   limit(8)
                end
-    if articles.length < 3
-      @ready_to_receive_email = false
-    end
+    @ready_to_receive_email = false if articles.length < 3
     articles
   end
 

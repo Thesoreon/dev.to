@@ -15,13 +15,6 @@ class UserDashboard < Administrate::BaseDashboard
     username: Field::String,
     twitter_username: Field::String,
     github_username: Field::String,
-    banned: UserBannedField,
-    reason_for_ban: ReasonForBanField,
-    warned: UserWarnedField,
-    reason_for_warning: ReasonForWarningField,
-    trusted: TrustedUserField,
-    scholar: UserScholarField,
-    analytics: UserAnalyticsField,
     summary: Field::String,
     email: Field::String,
     website_url: Field::String,
@@ -44,7 +37,9 @@ class UserDashboard < Administrate::BaseDashboard
     dribbble_url: Field::String,
     medium_url: Field::String,
     gitlab_url: Field::String,
+    instagram_url: Field::String,
     linkedin_url: Field::String,
+    twitch_url: Field::String,
     feed_admin_publish_permission: Field::Boolean,
     feed_mark_canonical: Field::Boolean,
     saw_onboarding: Field::Boolean,
@@ -65,7 +60,6 @@ class UserDashboard < Administrate::BaseDashboard
     twitter_username
     github_username
     name
-    banned
   ].freeze
 
   # SHOW_PAGE_ATTRIBUTES
@@ -83,13 +77,6 @@ class UserDashboard < Administrate::BaseDashboard
     github_username
     profile_image
     org_admin
-    banned
-    reason_for_ban
-    warned
-    reason_for_warning
-    trusted
-    scholar
-    analytics
     summary
     website_url
     facebook_url
@@ -97,7 +84,9 @@ class UserDashboard < Administrate::BaseDashboard
     dribbble_url
     medium_url
     gitlab_url
+    instagram_url
     linkedin_url
+    twitch_url
     bg_color_hex
     text_color_hex
     reputation_modifier

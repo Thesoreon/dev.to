@@ -8,7 +8,7 @@ RSpec.describe RatingVote, type: :model do
 
   describe "validations" do
     it { is_expected.to validate_numericality_of(:rating).is_greater_than(0.0).is_less_than_or_equal_to(10.0) }
-    it { is_expected.to validate_inclusion_of(:group).in_array(%w(experience_level)) }
+    it { is_expected.to validate_inclusion_of(:group).in_array(%w[experience_level]) }
   end
 
   describe "uniqueness" do
@@ -51,6 +51,13 @@ RSpec.describe RatingVote, type: :model do
       nontrusted_user = create(:user)
       rating = build(:rating_vote, article_id: article.id, user_id: nontrusted_user.id)
       expect(rating).not_to be_valid
+    end
+
+    it "does allows author to make rating on own post" do
+      nontrusted_user = create(:user)
+      article = create(:article, user_id: nontrusted_user.id)
+      rating = build(:rating_vote, article_id: article.id, user_id: nontrusted_user.id)
+      expect(rating).to be_valid
     end
   end
 end

@@ -1,4 +1,6 @@
 class CodesandboxTag < LiquidTagBase
+  PARTIAL = "liquids/codesandbox".freeze
+
   def initialize(tag_name, id, tokens)
     super
     @id = parse_id(id)
@@ -6,10 +8,13 @@ class CodesandboxTag < LiquidTagBase
   end
 
   def render(_context)
-    '<iframe src="https://codesandbox.io/embed/' + @id + @query + '"
-      style="width:100%; height:calc(300px + 8vw); border:0; border-radius: 4px; overflow:hidden;"
-      sandbox="allow-same-origin allow-scripts allow-forms allow-top-navigation-by-user-activation>"
-    </iframe>'
+    ActionController::Base.new.render_to_string(
+      partial: PARTIAL,
+      locals: {
+        id: @id,
+        query: @query
+      },
+    )
   end
 
   private
@@ -28,7 +33,7 @@ class CodesandboxTag < LiquidTagBase
   def parse_options(input)
     _, *options = input.split(" ")
 
-    options.map { |o| valid_option(o) }.reject { |e| e == nil }
+    options.map { |option| valid_option(option) }.reject(&:nil?)
 
     query = options.join("&")
 
@@ -43,11 +48,9 @@ class CodesandboxTag < LiquidTagBase
   # composed of letters, numbers, dashes, underscores, forward slashes, @ signs, periods/dots,
   # and % symbols.  Invalid options will raise an exception
   def valid_option(option)
-    if (option =~ /\A(initialpath=([a-zA-Z0-9\-\_\/\.\@\%])+)\Z|\A(module=([a-zA-Z0-9\-\_\/\.\@\%])+)\Z/)&.zero?
-      option
-    else
-      raise StandardError, "CodeSandbox Error: Invalid options"
-    end
+    raise StandardError, "CodeSandbox Error: Invalid options" unless (option =~ /\A(initialpath=([a-zA-Z0-9\-\_\/\.\@\%])+)\Z|\A(module=([a-zA-Z0-9\-\_\/\.\@\%])+)\Z|\A(runonclick=((0|1){1}))\Z/)&.zero?
+
+    option
   end
 end
 

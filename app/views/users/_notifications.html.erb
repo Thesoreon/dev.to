@@ -15,6 +15,18 @@
         <%= f.label :email_membership_newsletter, "Send me sustaining membership newsletter emails" %>
       </div>
     <% end %>
+    <% if current_user.tag_moderator? %>
+      <div class="sub-field">
+        <%= f.check_box :email_tag_mod_newsletter %>
+        <%= f.label :email_tag_mod_newsletter, "Send me tag moderator newsletter emails" %>
+      </div>
+    <% end %>
+    <% if current_user.has_role?(:trusted) %>
+      <div class="sub-field">
+        <%= f.check_box :email_community_mod_newsletter %>
+        <%= f.label :email_community_mod_newsletter, "Send me community moderator newsletter emails" %>
+      </div>
+    <% end %>
     <div class="sub-field">
       <%= f.check_box :email_comment_notifications %>
       <%= f.label :email_comment_notifications, "Send me an email when someone replies to me in a comment thread" %>
@@ -41,13 +53,24 @@
     </div>
   </div>
   <h3>Mobile Notification Settings (Beta)</h3>
-  <p><em>iOS only for now. Additional settings and platforms will be rolled out as new notification features are made available.</em></p>
+  <p>
+    <em>iOS only for now. Additional settings and platforms will be rolled out as new notification features are made available.</em>
+  </p>
   <div class="checkbox-field">
     <div class="sub-field">
       <%= f.check_box :mobile_comment_notifications %>
       <%= f.label :mobile_comment_notifications, "Notify me when someone replies to me in a comment thread" %>
     </div>
   </div>
+  <% if current_user.trusted %>
+    <h3>Mod Notification Settings</h3>
+    <div class="checkbox-field">
+      <div class="sub-field">
+        <%= f.check_box :mod_roundrobin_notifications %>
+        <%= f.label :mod_roundrobin_notifications, "Send me occasional community-success mod notifications" %>
+      </div>
+    </div>
+  <% end %>
   <div class="field">
     <label></label>
     <%= f.hidden_field :tab, value: @tab %>

@@ -3,8 +3,12 @@ class PodcastEpisode < ApplicationRecord
 
   acts_as_taggable
 
+  delegate :slug, to: :podcast, prefix: true
+  delegate :image_url, to: :podcast, prefix: true
+  delegate :title, to: :podcast, prefix: true
+
   belongs_to :podcast
-  has_many :comments, as: :commentable
+  has_many :comments, as: :commentable, inverse_of: :commentable
 
   mount_uploader :image, ProfileImageUploader
   mount_uploader :social_image, ProfileImageUploader
@@ -21,16 +25,20 @@ class PodcastEpisode < ApplicationRecord
 
   before_validation :prefix_all_images
 
+  scope :reachable, -> { where(reachable: true) }
+  scope :published, -> { joins(:podcast).where(podcasts: { published: true }) }
+  scope :available, -> { reachable.published }
+
   algoliasearch per_environment: true do
     attribute :id
     add_index "searchables",
-                  id: :index_id,
-                  per_environment: true do
+              id: :index_id,
+              per_environment: true do
       attribute :title, :body, :quote, :summary, :subtitle, :website_url,
-      :published_at, :comments_count, :path, :class_name,
-      :user_name, :user_username, :published, :comments_blob,
-      :body_text, :tag_list, :tag_keywords_for_search,
-      :positive_reactions_count, :search_score
+                :published_at, :comments_count, :path, :class_name,
+                :user_name, :user_username, :published, :comments_blob,
+                :body_text, :tag_list, :tag_keywords_for_search,
+                :positive_reactions_count, :search_score
       attribute :user do
         { name: podcast.name,
           username: user_username,
@@ -65,19 +73,9 @@ class PodcastEpisode < ApplicationRecord
   end
 
   def path
+    return nil unless podcast&.slug
+
     "/#{podcast.slug}/#{slug}"
-  end
-
-  def podcast_slug
-    podcast.slug
-  end
-
-  def podcast_image_url
-    podcast.image_url
-  end
-
-  def podcast_title
-    podcast.title
   end
 
   def published_at_int
@@ -115,23 +113,12 @@ class PodcastEpisode < ApplicationRecord
   def zero_method
     0
   end
-  alias_method :hotness_score, :zero_method
-  alias_method :search_score, :zero_method
-  alias_method :positive_reactions_count, :zero_method
+  alias hotness_score zero_method
+  alias search_score zero_method
+  alias positive_reactions_count zero_method
 
   def bust_cache
-    purge
-    purge_all
-    begin
-      cache_buster = CacheBuster.new
-      cache_buster.bust(path)
-      cache_buster.bust("/" + podcast_slug)
-      cache_buster.bust("/pod")
-      cache_buster.bust(path)
-    rescue StandardError
-    end
-    purge
-    purge_all
+    PodcastEpisodes::BustCacheJob.perform_later(id, path, podcast_slug)
   end
 
   def class_name
@@ -146,9 +133,9 @@ class PodcastEpisode < ApplicationRecord
   def nil_method
     nil
   end
-  alias_method :user_id, :nil_method
-  alias_method :second_user_id, :nil_method
-  alias_method :third_user_id, :nil_method
+  alias user_id nil_method
+  alias second_user_id nil_method
+  alias third_user_id nil_method
 
   def liquid_tags_used
     []
@@ -157,7 +144,7 @@ class PodcastEpisode < ApplicationRecord
   private
 
   def prefix_all_images
-    return unless body.present?
+    return if body.blank?
 
     self.processed_html = body.
       gsub("\r\n<p>&nbsp;</p>\r\n", "").gsub("\r\n<p>&nbsp;</p>\r\n", "").
@@ -175,13 +162,13 @@ class PodcastEpisode < ApplicationRecord
 
         cloudinary_img_src = ActionController::Base.helpers.
           cl_image_path(img_src,
-            type: "fetch",
-            width: 725,
-            crop: "limit",
-            quality: quality,
-            flags: "progressive",
-            fetch_format: "auto",
-            sign_url: true)
+                        type: "fetch",
+                        width: 725,
+                        crop: "limit",
+                        quality: quality,
+                        flags: "progressive",
+                        fetch_format: "auto",
+                        sign_url: true)
         self.processed_html = processed_html.gsub(img_src, cloudinary_img_src)
       end
     end

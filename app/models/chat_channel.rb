@@ -1,35 +1,35 @@
 class ChatChannel < ApplicationRecord
   include AlgoliaSearch
-  attr_accessor :current_user
+  attr_accessor :current_user, :usernames_string
 
   has_many :messages
   has_many :chat_channel_memberships, dependent: :destroy
   has_many :users, through: :chat_channel_memberships
 
-  has_many :active_memberships, -> { where status: "active" }, class_name: "ChatChannelMembership"
-  has_many :pending_memberships, -> { where status: "pending" }, class_name: "ChatChannelMembership"
-  has_many :rejected_memberships, -> { where status: "rejected" }, class_name: "ChatChannelMembership"
-  has_many :mod_memberships, -> { where role: "mod" }, class_name: "ChatChannelMembership"
+  has_many :active_memberships, -> { where status: "active" }, class_name: "ChatChannelMembership", inverse_of: :chat_channel
+  has_many :pending_memberships, -> { where status: "pending" }, class_name: "ChatChannelMembership", inverse_of: :chat_channel
+  has_many :rejected_memberships, -> { where status: "rejected" }, class_name: "ChatChannelMembership", inverse_of: :chat_channel
+  has_many :mod_memberships, -> { where role: "mod" }, class_name: "ChatChannelMembership", inverse_of: :chat_channel
   has_many :active_users, through: :active_memberships, class_name: "User", source: :user
   has_many :pending_users, through: :pending_memberships, class_name: "User", source: :user
   has_many :rejected_users, through: :rejected_memberships, class_name: "User", source: :user
   has_many :mod_users, through: :mod_memberships, class_name: "User", source: :user
 
-  validates :channel_type, presence: true, inclusion: { in: %w(open invite_only direct) }
-  validates :status, presence: true, inclusion: { in: %w(active inactive) }
+  validates :channel_type, presence: true, inclusion: { in: %w[open invite_only direct] }
+  validates :status, presence: true, inclusion: { in: %w[active inactive blocked] }
   validates :slug, uniqueness: true, presence: true
 
   algoliasearch index_name: "SecuredChatChannel_#{Rails.env}" do
     attribute :id, :viewable_by, :slug, :channel_type,
-      :channel_name, :channel_users, :last_message_at, :status,
-      :messages_count, :channel_human_names, :channel_mod_ids, :pending_users_select_fields,
-      :description
+              :channel_name, :last_message_at, :status,
+              :messages_count, :channel_human_names, :channel_mod_ids, :pending_users_select_fields,
+              :description
     searchableAttributes %i[channel_name channel_slug channel_human_names]
     attributesForFaceting ["filterOnly(viewable_by)", "filterOnly(status)", "filterOnly(channel_type)"]
     ranking ["desc(last_message_at)"]
   end
 
-  before_destroy :remove_from_index!
+  before_destroy :remove_from_index!, prepend: true
 
   def open?
     channel_type == "open"
@@ -44,7 +44,7 @@ class ChatChannel < ApplicationRecord
   end
 
   def clear_channel
-    messages.find_each(&:destroy!)
+    messages.delete_all
     Pusher.trigger(pusher_channels, "channel-cleared", { chat_channel_id: id }.to_json)
     true
   rescue Pusher::Error => e
@@ -68,10 +68,13 @@ class ChatChannel < ApplicationRecord
       contrived_name = "Direct chat between " + usernames.join(" and ")
       slug = usernames.join("/")
     else
-      slug = contrived_name.to_s.downcase.tr(" ", "-").gsub(/[^\w-]/, "").tr("_", "") + "-" + rand(100000).to_s(26)
+      slug = contrived_name.to_s.parameterize + "-" + rand(100_000).to_s(26)
     end
 
-    if channel = ChatChannel.find_by_slug(slug)
+    channel = ChatChannel.find_by(slug: slug)
+    if channel
+      raise "Blocked channel" if channel.status == "blocked"
+
       channel.status = "active"
       channel.save
     else
@@ -84,6 +87,7 @@ class ChatChannel < ApplicationRecord
       )
       channel.add_users(users)
       channel.index!
+      channel.chat_channel_memberships.map(&:index!)
     end
     channel
   end
@@ -92,6 +96,10 @@ class ChatChannel < ApplicationRecord
     Array(users).each do |user|
       ChatChannelMembership.create!(user_id: user.id, chat_channel_id: id)
     end
+  end
+
+  def remove_user(user)
+    chat_channel_memberships.where(user: user).destroy_all
   end
 
   def pusher_channels
@@ -104,9 +112,9 @@ class ChatChannel < ApplicationRecord
     end
   end
 
-  def adjusted_slug(user = nil, caller_type = "reciever")
+  def adjusted_slug(user = nil, caller_type = "receiver")
     user ||= current_user
-    if direct? && caller_type == "reciever"
+    if direct? && caller_type == "receiver"
       "@" + slug.gsub("/#{user.username}", "").gsub("#{user.username}/", "")
     elsif caller_type == "sender"
       "@" + user.username
@@ -125,8 +133,8 @@ class ChatChannel < ApplicationRecord
 
   def channel_human_names
     active_memberships.
-      order("last_opened_at DESC").limit(5).includes(:user).map do |m|
-        m.user.name
+      order("last_opened_at DESC").limit(5).includes(:user).map do |membership|
+        membership.user.name
       end
   end
 
@@ -134,28 +142,28 @@ class ChatChannel < ApplicationRecord
     # Purely for algolia indexing
     obj = {}
     active_memberships.
-      order("last_opened_at DESC").limit(25).includes(:user).each_with_index do |m, i|
-      obj[m.user.username] = user_obj(m, i)
+      order("last_opened_at DESC").includes(:user).each do |membership|
+      obj[membership.user.username] = user_obj(membership)
     end
     obj
-  end
-
-  def pending_users_select_fields
-    pending_users.select(:id, :username, :name)
   end
 
   def channel_mod_ids
     mod_users.pluck(:id)
   end
 
-  def user_obj(membership, index)
+  def user_obj(membership)
     {
-      profile_image: index < 25 ? ProfileImage.new(membership.user).get(90) : nil,
+      profile_image: ProfileImage.new(membership.user).get(90),
       darker_color: membership.user.decorate.darker_color,
       name: membership.user.name,
       last_opened_at: membership.last_opened_at,
       username: membership.user.username,
       id: membership.user_id
     }
+  end
+
+  def pending_users_select_fields
+    pending_users.select(:id, :username, :name, :updated_at)
   end
 end

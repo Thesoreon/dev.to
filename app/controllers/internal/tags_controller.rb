@@ -1,4 +1,5 @@
 class Internal::TagsController < Internal::ApplicationController
+  include AuditInstrumentation
   layout "internal"
 
   def index
@@ -9,47 +10,43 @@ class Internal::TagsController < Internal::ApplicationController
             else
               Tag.order("taggings_count DESC").page(params[:page]).per(50)
             end
-    if params[:search].present?
-      @tags = @tags.where("tags.name ILIKE :search", search: "%#{params[:search]}%")
-    end
+    @tags = @tags.where("tags.name ILIKE :search", search: "%#{params[:search]}%") if params[:search].present?
   end
 
   def show
     @tag = Tag.find(params[:id])
   end
 
-  def edit
-    @tag = Tag.find(params[:id])
-  end
-
   def update
     @tag = Tag.find(params[:id])
-    add_moderator if params[:tag][:tag_moderator_id]
-    remove_moderator if params[:tag][:remove_moderator_id]
+    @add_user_id = params[:tag][:tag_moderator_id]
+    @remove_user_id = params[:tag][:remove_moderator_id]
+    add_moderator if @add_user_id
+    remove_moderator if @remove_user_id
     @tag.update!(tag_params)
+
+    notify(:internal, current_user, __method__) { tag_params.dup }
     redirect_to "/internal/tags/#{params[:id]}"
   end
 
   private
 
   def remove_moderator
-    User.find(params[:tag][:remove_moderator_id]).remove_role :tag_moderator, @tag
+    user = User.find(@remove_user_id)
+    user.update(email_tag_mod_newsletter: false)
+    AssignTagModerator.remove_tag_moderator(user, @tag)
   end
 
   def add_moderator
-    user_id = params[:tag][:tag_moderator_id]
-    AssignTagModerator.add_tag_moderators([user_id], [@tag.id])
+    User.find(@add_user_id).update(email_tag_mod_newsletter: true)
+    AssignTagModerator.add_tag_moderators([@add_user_id], [@tag.id])
   end
 
   def tag_params
-    params.require(:tag).permit(:supported,
-                                :rules_markdown,
-                                :short_summary,
-                                :pretty_name,
-                                :bg_color_hex,
-                                :text_color_hex,
-                                :tag_moderator_id,
-                                :remove_moderator_id,
-                                :alias_for)
+    allowed_params = %i[
+      supported rules_markdown short_summary pretty_name bg_color_hex
+      text_color_hex tag_moderator_id remove_moderator_id alias_for badge_id category
+    ]
+    params.require(:tag).permit(allowed_params)
   end
 end

@@ -12,10 +12,8 @@ function initializeBaseTracking() {
     wait++;
     if (window.ga && ga.create) {
       ga('create', '<%= ApplicationConfig["GA_TRACKING_ID"] %>', 'auto');
+      ga('set', 'anonymizeIp', true);
       ga('send', 'pageview', location.pathname + location.search);
-      if (document.location.search.indexOf('newly-registered-user=true') > -1) {
-        ga('send', 'event', 'registration', 'New user registration', location.pathname, null);
-      }
       clearInterval(waitingOnGA);
       logImpressions();
     }
@@ -116,7 +114,48 @@ function trackCustomImpressions() {
         successLinks[i].addEventListener('click', function() { trackHtmlVariantSuccess(dataBody, csrfToken) });
       }
     }
-  }, 1500)
+
+    // page view
+    if (ArticleElement && tokenMeta && !isBot) {
+      var randomNumber = Math.floor(Math.random() * 10); // 1 in 10; Only track 1 in 10 impressions
+      if (!checkUserLoggedIn() && randomNumber != 1) {
+        return;
+      }
+      var dataBody = {
+        article_id: ArticleElement.dataset.articleId,
+        referrer: document.referrer,
+        user_agent: navigator.userAgent,
+      };
+      var csrfToken = tokenMeta.getAttribute('content');
+      trackPageView(dataBody, csrfToken);
+      var timeOnSiteCounter = 0;
+      var timeOnSiteInterval = setInterval(function(){
+        timeOnSiteCounter++
+        var ArticleElement = document.getElementById('article-body');
+        if (ArticleElement && checkUserLoggedIn()) {
+          trackFifteenSecondsOnPage(ArticleElement.dataset.articleId, csrfToken);
+        } else {
+          clearInterval(timeOnSiteInterval);
+        }
+        if ( timeOnSiteCounter > 118 ) {
+          clearInterval(timeOnSiteInterval);
+        }
+      }, 15000)
+    }
+
+    // display add
+    var adBox = document.getElementById('sponsorship-arbitrary-display-widget')
+    if (adBox
+      && tokenMeta
+      && !isBot
+      && windowBigEnough
+      && checkUserLoggedIn()) {
+        var csrfToken = tokenMeta.getAttribute('content');
+        trackAdImpression(csrfToken, adBox)
+        adBox.removeEventListener('click', trackAdClick, false );
+        adBox.addEventListener('click', function() { trackAdClick(csrfToken, adBox) });
+      }
+  }, 1800)
 }
 
 function trackHTMLVariantTrial(dataBody, csrfToken) {
@@ -144,4 +183,68 @@ function trackHtmlVariantSuccess(dataBody, csrfToken) {
     body: JSON.stringify(dataBody),
     credentials: 'same-origin',
   })
+}
+
+function trackPageView(dataBody, csrfToken) {
+  window.fetch('/page_views', {
+    method: 'POST',
+    headers: {
+      'X-CSRF-Token': csrfToken,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(dataBody),
+    credentials: 'same-origin',
+  })
+}
+
+function trackFifteenSecondsOnPage(articleId, csrfToken) {
+  window.fetch('/page_views/' + articleId, {
+    method: 'PATCH',
+    headers: {
+      'X-CSRF-Token': csrfToken,
+      'Content-Type': 'application/json',
+    },
+    credentials: 'same-origin',
+  })
+}
+
+function trackAdImpression(token, adBox) {
+  var dataBody = {
+    display_ad_event: {
+      display_ad_id: adBox.dataset.id,
+      context_type: "home",
+      category: "impression",
+    }
+  }
+  window.fetch('/display_ad_events', {
+    method: 'POST',
+    headers: {
+      'X-CSRF-Token': token,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(dataBody),
+    credentials: 'same-origin',
+  })
+}
+
+function trackAdClick(token, adBox) {
+  if (!adClicked) {
+    var dataBody = {
+      display_ad_event: {
+        display_ad_id: adBox.dataset.id,
+        context_type: "home",
+        category: "click",
+      }
+    }
+    window.fetch('/display_ad_events', {
+      method: 'POST',
+      headers: {
+        'X-CSRF-Token': token,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(dataBody),
+      credentials: 'same-origin',
+    })
+  }
+  adClicked = true;
 }

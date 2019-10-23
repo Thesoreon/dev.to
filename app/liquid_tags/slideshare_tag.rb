@@ -1,32 +1,27 @@
 class SlideshareTag < LiquidTagBase
+  PARTIAL = "liquids/slideshare".freeze
+
   def initialize(tag_name, key, tokens)
     super
-    @key    = validate key.strip
-    @height = 450
+    @key = validate(key.strip)
   end
 
   def render(_context)
-    finalize_html <<-HTML
-      <iframe
-        src="//www.slideshare.net/slideshow/embed_code/key/#{@key}"
-        alt="#{@key} on slideshare.net"
-        width="100%"
-        height="#{@height}"
-        frameborder="0"
-        scrolling="no"
-        allowfullscreen>
-      </iframe>
-    HTML
+    ActionController::Base.new.render_to_string(
+      partial: PARTIAL,
+      locals: {
+        key: @key,
+        height: 450
+      },
+    )
   end
 
   private
 
   def validate(key)
-    if key.match?(/\A[a-zA-Z0-9]{14}\Z/)
-      key
-    else
-      raise StandardError, "Invalid Slideshare Key"
-    end
+    raise StandardError, "Invalid Slideshare Key" unless key.match?(/\A[a-zA-Z0-9]{14}\Z/)
+
+    key
   end
 end
 

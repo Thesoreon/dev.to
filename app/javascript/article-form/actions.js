@@ -18,9 +18,23 @@ export function previewArticle(payload, successCb, failureCb) {
 
 export function getArticle() {}
 
+function processPayload(payload) {
+  const {
+    previewShowing,
+    helpShowing,
+    previewResponse,
+    helpHTML,
+    imageManagementShowing,
+    moreConfigShowing,
+    errors,
+    ...neededPayload
+  } = payload;
+  return neededPayload;
+}
+
 export function submitArticle(payload, clearStorage, errorCb, failureCb) {
   const method = payload.id ? 'PUT' : 'POST';
-  const url = payload.id ? `/api/articles/${payload.id}` : '/api/articles';
+  const url = payload.id ? `/articles/${payload.id}` : '/articles';
   fetch(url, {
     method,
     headers: {
@@ -29,7 +43,7 @@ export function submitArticle(payload, clearStorage, errorCb, failureCb) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      article: payload,
+      article: processPayload(payload),
     }),
     credentials: 'same-origin',
   })
@@ -45,27 +59,37 @@ export function submitArticle(payload, clearStorage, errorCb, failureCb) {
     .catch(failureCb);
 }
 
+function generateUploadFormdata(payload) {
+  const token = window.csrfToken;
+  const formData = new FormData();
+  formData.append('authenticity_token', token);
+
+  Object.entries(payload.image).forEach(([_, value]) =>
+    formData.append('image[]', value),
+  );
+
+  if (payload.wrap_cloudinary) {
+    formData.append('wrap_cloudinary', 'true');
+  }
+  return formData;
+}
+
 export function generateMainImage(payload, successCb, failureCb) {
   fetch('/image_uploads', {
     method: 'POST',
     headers: {
-      'X-CSRF-Token': csrfToken,
+      'X-CSRF-Token': window.csrfToken,
     },
     body: generateUploadFormdata(payload),
     credentials: 'same-origin',
   })
     .then(response => response.json())
-    .then(successCb)
-    .catch(failureCb);
-}
+    .then(json => {
+      if (json.error) {
+        throw new Error(json.error);
+      }
 
-function generateUploadFormdata(payload) {
-  const token = window.csrfToken;
-  const formData = new FormData();
-  formData.append('authenticity_token', token);
-  formData.append('image', payload.image[0]);
-  if (payload.wrap_cloudinary) {
-    formData.append('wrap_cloudinary', 'true');
-  }
-  return formData;
+      return successCb(json);
+    })
+    .catch(failureCb);
 }

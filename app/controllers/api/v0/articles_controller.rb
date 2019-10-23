@@ -1,96 +1,102 @@
 module Api
   module V0
     class ArticlesController < ApiController
-      before_action :set_cache_control_headers, only: [:index]
-      caches_action :show,
-        cache_path: Proc.new { |c| c.params.permit! },
-        expires_in: 5.minutes
       respond_to :json
 
+      before_action :authenticate_with_api_key_or_current_user!, only: %i[create update]
+      before_action :authenticate!, only: :me
+      before_action -> { doorkeeper_authorize! :public }, only: %w[index show], if: -> { doorkeeper_token }
+
+      before_action :set_cache_control_headers, only: [:index]
+      caches_action :show,
+                    cache_path: proc { |c| c.params.permit! },
+                    expires_in: 5.minutes
+
       before_action :cors_preflight_check
-      before_action :set_user
       after_action :cors_set_access_control_headers
+
+      # skip CSRF checks for create and update
+      skip_before_action :verify_authenticity_token, only: %i[create update]
 
       def index
         @articles = ArticleApiIndexService.new(params).get
+
         key_headers = [
           "articles_api",
           params[:tag],
           params[:page],
-          params[:userame],
+          params[:username],
           params[:signature],
           params[:state],
+          params[:collection_id],
         ]
         set_surrogate_key_header key_headers.join("_")
       end
 
       def show
-        @article = if params[:id] == "by_path"
-                     Article.includes(:user).find_by_path(params[:url])&.decorate
-                   else
-                     Article.includes(:user).find(params[:id])&.decorate
-                   end
-        not_found unless @article&.published
-      end
-
-      def onboarding
-        tag_list = if params[:tag_list].present?
-                     params[:tag_list].split(",")
-                   else
-                     ["career", "discuss", "productivity"]
-                   end
-        @articles = []
-        4.times do
-          @articles << Suggester::Articles::Classic.new.get(tag_list)
-        end
-        Article.tagged_with(tag_list, any: true).
-          order("published_at DESC").
-          where("positive_reactions_count > ? OR comments_count > ? AND published = ?", 10, 3, true).
-          limit(15).each do |article|
-            @articles << article
-          end
-        @articles = @articles.uniq.sample(6)
+        @article = Article.published.includes(:user).find(params[:id]).decorate
       end
 
       def create
-        @article = ArticleCreationService.new(@user, article_params, {}).create!
-        render json: if @article.persisted?
-                       @article.to_json(only: [:id], methods: [:current_state_path])
-                     else
-                       @article.errors.to_json
-                     end
+        @article = Articles::Creator.call(@user, article_params)
+        if @article.persisted?
+          render "show", status: :created, location: @article.url
+        else
+          message = @article.errors.full_messages.join(", ")
+          render json: { error: message, status: 422 }, status: :unprocessable_entity
+        end
       end
 
       def update
-        @article = Article.find(params[:id])
-        not_found if @article.user_id != @user.id && !@user.has_role?(:super_admin)
-        render json: if @article.update(article_params)
-                       @article.to_json(only: [:id], methods: [:current_state_path])
-                     else
-                       @article.errors.to_json
-                     end
+        @article = Articles::Updater.call(@user, params[:id], article_params)
+        render "show", status: :ok
+      end
+
+      def me
+        doorkeeper_scope = %w[unpublished all].include?(params[:status]) ? :read_articles : :public
+        doorkeeper_authorize! doorkeeper_scope if doorkeeper_token
+
+        per_page = (params[:per_page] || 30).to_i
+        num = [per_page, 1000].min
+
+        @articles = case params[:status]
+                    when "published"
+                      @user.articles.published
+                    when "unpublished"
+                      @user.articles.unpublished
+                    when "all"
+                      @user.articles
+                    else
+                      @user.articles.published
+                    end
+
+        @articles = @articles.
+          includes(:organization).
+          order(published_at: :desc, created_at: :desc).
+          page(params[:page]).
+          per(num).
+          decorate
       end
 
       private
 
-      def set_user
-        @user = current_user
+      def article_params
+        allowed_params = [
+          :title, :body_markdown, :published, :series,
+          :main_image, :canonical_url, :description, tags: []
+        ]
+        allowed_params << :organization_id if params["article"]["organization_id"] && allowed_to_change_org_id?
+        params.require(:article).permit(allowed_params)
       end
 
-      def article_params
-        params["article"].transform_keys!(&:underscore)
-        params["article"]["organization_id"] = if params["article"]["post_under_org"]
-                                                 @user.organization_id
-                                               end
-        if params["article"]["series"].present?
-          params["article"]["collection_id"] = Collection.find_series(params["article"]["series"], @user)&.id
-        elsif params["article"]["series"] == ""
-          params["article"]["collection_id"] = nil
+      def allowed_to_change_org_id?
+        potential_user = @article&.user || @user
+        if @article.nil? || OrganizationMembership.exists?(user: potential_user, organization_id: params["article"]["organization_id"])
+          OrganizationMembership.exists?(user: potential_user, organization_id: params["article"]["organization_id"])
+        elsif potential_user == @user
+          potential_user.org_admin?(params["article"]["organization_id"]) ||
+            @user.any_admin?
         end
-        params.require(:article).permit(
-          :title, :body_markdown, :main_image, :published, :description,
-          :tag_list, :organization_id, :canonical_url, :series, :collection_id
-        )
       end
     end
   end

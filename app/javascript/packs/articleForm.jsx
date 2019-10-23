@@ -10,27 +10,33 @@ HTMLDocument.prototype.ready = new Promise(resolve => {
   return null;
 });
 
-document.ready.then(function(){
-  loadForm();
-  window.InstantClick.on('change', () => {
-    if (document.getElementById('article-form')){
-      loadForm();
-    }
-  });
-});
-
-function loadForm(){
+function loadForm() {
   getUserDataAndCsrfToken().then(({ currentUser, csrfToken }) => {
     window.currentUser = currentUser;
     window.csrfToken = csrfToken;
 
     const root = document.getElementById('article-form');
-    const { article, organization } = root.dataset;
+    const { article, organizations, version } = root.dataset;
 
     render(
-      <ArticleForm article={article} organization={organization} />,
+      <ArticleForm
+        article={article}
+        organizations={organizations}
+        version={version}
+      />,
       root,
       root.firstElementChild,
     );
-  })
+  });
 }
+
+document.ready.then(() => {
+  loadForm();
+  window.InstantClick.on('change', () => {
+    if (document.getElementById('article-form')) {
+      loadForm();
+    }
+  });
+});
+
+

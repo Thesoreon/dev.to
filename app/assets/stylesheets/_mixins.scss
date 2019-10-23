@@ -1,0 +1,46 @@
+/**
+*
+* Makes working with themeable CSS variables easier.
+*
+* $property: the CSS property to theme.
+* $cssVariable: The CSS variable that will store the themed value.
+* $fallback: The value to use as a fallback but as well for the CSS variable default value.
+*/
+@mixin themeable($property, $cssVariable, $fallback) {
+  #{$property}: #{$fallback};
+  #{$property}: var(--#{$cssVariable}, #{$fallback});
+}
+
+/**
+*
+* Makes working with themeable CSS variables easier. Used when
+* a CSS variable requires !important as a postfix of the CSS property's
+* value where the CSS variable is being used.
+*
+* $property: the CSS property to theme.
+* $cssVariable: The CSS variable that will store the themed value.
+* $fallback: The value to use as a fallback but as well for the CSS variable default value.
+*/
+@mixin themeable-important($property, $cssVariable, $fallback) {
+  #{$property}: #{$fallback} !important;
+  #{$property}: var(--#{$cssVariable}, #{$fallback}) !important;
+}
+
+
+/* Mixin for a load more wrapper, made by a container div and child button */
+@mixin load-more() {
+  text-align: center;
+
+  button {
+    background: transparent;
+    @include themeable(border, theme-border, 1px solid $light-medium-gray);
+    font-size: 17px;
+    padding: 14px 5px;
+    margin: 40px auto 70px;
+    width: 320px;
+    max-width: 80%;
+    border-radius: 100px;
+    font-weight: bold;
+    color: inherit
+  }
+}

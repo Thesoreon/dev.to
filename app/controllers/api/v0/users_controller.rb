@@ -1,9 +1,12 @@
 module Api
   module V0
-    class UsersController < ApplicationController
+    class UsersController < ApiController
+      before_action :authenticate!, only: %i[me]
+      before_action -> { doorkeeper_authorize! :public }, only: :me, if: -> { doorkeeper_token }
+
       def index
         if !user_signed_in? || less_than_one_day_old?(current_user)
-          usernames = ["ben", "jess", "peter", "maestromac", "andy", "liana"]
+          usernames = %w[ben jess peter maestromac andy liana]
           @users = User.where(username: usernames)
           return
         end
@@ -17,16 +20,19 @@ module Api
 
       def show
         @user = if params[:id] == "by_username"
-                  User.find_by_username(params[:url])
+                  User.find_by(username: params[:url])
                 else
                   User.find(params[:id])
                 end
       end
 
+      def me; end
+
+      private
+
       def less_than_one_day_old?(user)
         range = 1.day.ago.beginning_of_day..Time.current
-        user_identity_age = user.github_created_at ||
-          user.twitter_created_at || 8.days.ago
+        user_identity_age = user.github_created_at || user.twitter_created_at || 8.days.ago
         # last one is a fallback in case both are nil
         range.cover? user_identity_age
       end

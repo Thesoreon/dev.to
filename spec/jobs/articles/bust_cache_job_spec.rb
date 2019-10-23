@@ -1,24 +1,26 @@
 require "rails_helper"
 
 RSpec.describe Articles::BustCacheJob, type: :job do
-  describe "#perform_later" do
-    it "enqueues the job" do
-      ActiveJob::Base.queue_adapter = :test
-      expect do
-        described_class.perform_later([1, 2])
-      end.to have_enqueued_job.with([1, 2]).on_queue("articles_bust_cache")
+  describe "#perform_now" do
+    let(:article) { FactoryBot.create(:article) }
+    let(:cache_buster) { double }
+
+    before { allow(cache_buster).to receive(:bust_article) }
+
+    it "async busts cache" do
+      described_class.perform_now(article.id, cache_buster)
+      expect(cache_buster).to have_received(:bust_article).with(article)
     end
 
-    it "busts cache" do
-      article = create(:article)
-      path = article.path
+    context "without article" do
+      it "does not error" do
+        expect { described_class.perform_now(nil, cache_buster) }.not_to raise_error
+      end
 
-      cache_buster = double
-      allow(cache_buster).to receive(:bust)
-
-      described_class.perform_now([article.id], cache_buster)
-      expect(cache_buster).to have_received(:bust).with(path).once
-      expect(cache_buster).to have_received(:bust).with(path + "?i=i").once
+      it "does not bust cache" do
+        described_class.perform_now(nil, cache_buster)
+        expect(cache_buster).not_to have_received(:bust_article)
+      end
     end
   end
 end

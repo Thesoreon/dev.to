@@ -1,5 +1,3 @@
-# rubocop:disable Metrics/BlockLength
-
 Rails.application.configure do
   # Verifies that versions and hashed value of the package contents in the project's package.json
   config.webpacker.check_yarn_integrity = false
@@ -93,7 +91,7 @@ Rails.application.configure do
 
   # Timber.io logger
   send_logs_to_timber = ENV["SEND_LOGS_TO_TIMBER"] || "true" # <---- production should send timber logs by default
-  log_device = (send_logs_to_timber == "true") ? Timber::LogDevices::HTTP.new(ENV["TIMBER"]) : STDOUT
+  log_device = send_logs_to_timber == "true" ? Timber::LogDevices::HTTP.new(ENV["TIMBER"]) : STDOUT
   logger = Timber::Logger.new(log_device)
   logger.level = config.log_level
   config.logger = ActiveSupport::TaggedLogging.new(logger)
@@ -125,7 +123,7 @@ Rails.application.configure do
   }
 
   config.middleware.use Rack::HostRedirect,
-    "practicaldev.herokuapp.com" => "dev.to"
+                        "practicaldev.herokuapp.com" => "dev.to"
 end
 
-# rubocop:enable Metrics/BlockLength
+Rails.application.routes.default_url_options = { host: Rails.application.config.app_domain, protocol: :https }

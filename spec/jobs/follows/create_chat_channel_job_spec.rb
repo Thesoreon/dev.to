@@ -1,14 +1,7 @@
 require "rails_helper"
 
 RSpec.describe Follows::CreateChatChannelJob, type: :job do
-  describe "#perform_later" do
-    it "enqueues the job" do
-      ActiveJob::Base.queue_adapter = :test
-      expect do
-        described_class.perform_later(3)
-      end.to have_enqueued_job.with(3).on_queue("create_chat_channel_after_follow")
-    end
-  end
+  include_examples "#enqueues_job", "create_chat_channel_after_follow", 3
 
   describe "#perform_now" do
     let(:user) { create(:user) }
@@ -17,6 +10,12 @@ RSpec.describe Follows::CreateChatChannelJob, type: :job do
 
     it "creates a chat channel when mutual followers" do
       follow2 = create(:follow, follower: user2, followable: user)
+
+      # Follow has an after_create callback that creates a channel between the two users,
+      # so to make sure this test is correct, we delete all channels right after
+      ChatChannelMembership.delete_all
+      ChatChannel.delete_all
+
       expect do
         described_class.perform_now(follow2.id)
       end.to change(ChatChannel, :count).by(1)

@@ -1,15 +1,9 @@
 module Api
   module V0
     class PodcastEpisodesController < ApiController
-      # before_action :set_cache_control_headers, only: [:index, :show]
       caches_action :index,
-        cache_path: Proc.new { |c| c.params.permit! },
-        expires_in: 10.minutes
-      respond_to :json
-
-      caches_action :show,
-        cache_path: Proc.new { |c| c.params.permit! },
-        expires_in: 10.minutes
+                    cache_path: proc { |c| c.params.permit! },
+                    expires_in: 10.minutes
       respond_to :json
 
       before_action :cors_preflight_check
@@ -17,14 +11,18 @@ module Api
 
       def index
         @page = params[:page]
+
         if params[:username]
-          @podcast = Podcast.find_by_slug(params[:username]) || not_found
+          @podcast = Podcast.available.find_by!(slug: params[:username])
           @podcast_episodes = @podcast.
-            podcast_episodes.order("published_at desc").
+            podcast_episodes.reachable.order("published_at desc").
             page(@page).
             per(30)
         else
-          @podcast_episodes = PodcastEpisode.order("published_at desc").page(@page).per(30)
+          @podcast_episodes = PodcastEpisode.
+            reachable.
+            includes(:podcast).
+            order("published_at desc").page(@page).per(30)
         end
       end
     end

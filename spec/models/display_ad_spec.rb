@@ -15,8 +15,21 @@ RSpec.describe DisplayAd, type: :model do
     display_ad.placement_area = "tsdsdsdds"
     expect(display_ad).not_to be_valid
   end
-  it "only allows acceptable placement_area" do
-    display_ad.placement_area = "sidebar"
+  it "allows sidebar_right" do
+    display_ad.placement_area = "sidebar_right"
     expect(display_ad).to be_valid
+  end
+  it "allows sidebar_left" do
+    display_ad.placement_area = "sidebar_left"
+    expect(display_ad).to be_valid
+  end
+
+  it "displays published and approved posts" do
+    create(:display_ad, organization_id: organization.id, published: true, approved: true)
+    create(:display_ad, organization_id: organization.id, published: true, approved: true)
+    create(:display_ad, organization_id: organization.id, published: false, approved: true)
+    create(:display_ad, organization_id: organization.id, published: true, approved: false)
+    expect(described_class.for_display(described_class.last.placement_area).published).to eq(true)
+    expect(described_class.for_display(described_class.last.placement_area).approved).to eq(true)
   end
 end

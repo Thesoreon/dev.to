@@ -1,10 +1,9 @@
-# rubocop:disable RSpec/ExampleLength, RSpec/MultipleExpectations
 require "rails_helper"
 
 RSpec.describe Article, type: :model do
   def build_and_validate_article(*args)
     article = build(:article, *args)
-    article.validate
+    article.validate!
     article
   end
 
@@ -17,13 +16,14 @@ RSpec.describe Article, type: :model do
   it { is_expected.to validate_uniqueness_of(:feed_source_url).allow_blank }
   it { is_expected.to validate_presence_of(:title) }
   it { is_expected.to validate_length_of(:title).is_at_most(128) }
-  it { is_expected.to validate_length_of(:cached_tag_list).is_at_most(86) }
+  it { is_expected.to validate_length_of(:cached_tag_list).is_at_most(126) }
   it { is_expected.to belong_to(:user) }
   it { is_expected.to belong_to(:organization).optional }
   it { is_expected.to belong_to(:collection).optional }
   it { is_expected.to have_many(:comments) }
-  it { is_expected.to have_many(:reactions) }
-  it { is_expected.to have_many(:notifications) }
+  it { is_expected.to have_many(:reactions).dependent(:destroy) }
+  it { is_expected.to have_many(:notifications).dependent(:delete_all) }
+  it { is_expected.to have_many(:notification_subscriptions).dependent(:destroy) }
   it { is_expected.to validate_presence_of(:user_id) }
   it { is_expected.not_to allow_value("foo").for(:main_image_background_hex_color) }
 
@@ -40,7 +40,11 @@ RSpec.describe Article, type: :model do
   end
 
   it "reject future dates" do
-    expect(build(:article, with_date: true, date: "01/01/2020").valid?).to be(false)
+    expect(build(:article, with_date: true, date: Date.tomorrow).valid?).to be(false)
+  end
+
+  it "reject future dates even when it's published at" do
+    expect(build(:article, published_at: Date.tomorrow).valid?).to be(false)
   end
 
   it "has proper username" do
@@ -58,9 +62,9 @@ RSpec.describe Article, type: :model do
   end
 
   it "does not persist with invalid publish scoped data" do
-    article = Article.create(title: "hey",
-                             body_html: "hey hey hey hey hey hey",
-                             published: true)
+    article = described_class.create(title: "hey",
+                                     body_html: "hey hey hey hey hey hey",
+                                     published: true)
     expect(article.persisted?).to eq(false)
   end
 
@@ -112,17 +116,22 @@ RSpec.describe Article, type: :model do
     let(:article1) { build(:article, title: title, published: false) }
 
     before do
-      article0.validate
+      article0.validate!
     end
 
     context "when unpublished" do
       it "creates proper slug with this-is-the-slug format" do
-        expect(article0.slug).to match /(.*-){4,}/
+        expect(article0.slug).to match(/(.*-){4,}/)
       end
 
       it "modifies slug on create if proposed slug already exists on the user" do
         article1.validate
         expect(article1.slug).not_to start_with(article0.slug)
+      end
+
+      it "properly converts underscores and still has a valid slug" do
+        underscored_article = build(:article, title: "hey_hey_hey node_modules", published: false)
+        expect(underscored_article.valid?).to eq true
       end
     end
 
@@ -136,6 +145,11 @@ RSpec.describe Article, type: :model do
       it "does not change slug if the article was edited" do
         article0.update(title: "New title.")
         expect(article0.slug).to start_with("hey-this-is-a-slug")
+      end
+
+      it "properly converts underscores and still has a valid slug" do
+        underscored_article = build(:article, title: "hey_hey_hey node_modules", published: true)
+        expect(underscored_article.valid?).to eq true
       end
     end
   end
@@ -171,6 +185,18 @@ RSpec.describe Article, type: :model do
       it "rejects if there are more than 4 tags" do
         five_tags = "one, two, three, four, five"
         expect(build(:article, tags: five_tags).valid?).to be(false)
+      end
+
+      it "rejects if there are tags with length > 30" do
+        tags = "'testing tag length with more than 30 chars', tag"
+        expect(build(:article, tags: tags).valid?).to be(false)
+      end
+
+      context 'when description is empty' do
+        it 'parses tags' do
+          body_markdown = "---\ntitle: Title\npublished: false\ndescription:\ntags: one\n---\n\n"
+          expect(build_and_validate_article(body_markdown: body_markdown).tag_list).to eq(['one'])
+        end
       end
     end
 
@@ -236,58 +262,69 @@ RSpec.describe Article, type: :model do
       article.video_duration_in_seconds = 1161
       expect(article.video_duration_in_minutes).to eq("19:21")
     end
+
+    it "has video_duration_in_minutes display hour when video is an hour or longer" do
+      article.video_duration_in_seconds = 3600
+      expect(article.video_duration_in_minutes).to eq("1:00:00")
+    end
+
+    it "has correctly non-padded minutes with hour in video_duration_in_minutes" do
+      article.video_duration_in_seconds = 5000
+      expect(article.video_duration_in_minutes).to eq("1:23:20")
+    end
   end
 
-  describe "queries" do
-    let(:search_keyword) do
-      create(:search_keyword,
-        google_result_path: article.path,
-        google_position: 8,
-        google_volume: 2000,
-        google_difficulty: 10)
+  describe ".seo_boostable" do
+    it "returns articles ordered by organic_page_views_count" do
+      create(:article, score: 30)
+      create(:article, score: 30)
+      top_article = create(:article, organic_page_views_past_month_count: 20, score: 30)
+      articles = described_class.seo_boostable
+      expect(articles.first[0]).to eq(top_article.path)
     end
 
-    it "returns article plucked objects that match keyword query" do
-      search_keyword
-      article.update(featured: true)
-      articles = Article.seo_boostable
-      expect(articles.flatten[0]).to eq(article.path)
+    it "returns articles if within time frame" do
+      top_article = create(:article, organic_page_views_past_month_count: 20, score: 30)
+      articles = described_class.seo_boostable(nil, 1.month.ago)
+      expect(articles.first[0]).to eq(top_article.path)
     end
 
-    it "returns keyword articles by tag" do
-      search_keyword
-      article.update(featured: true)
-      articles = Article.seo_boostable(article.tags.first)
-      expect(articles.flatten[0]).to eq(article.path)
+    it "does not return articles outside of timeframe" do
+      top_article = create(:article, organic_page_views_past_month_count: 20, score: 30)
+      top_article.update_column(:published_at, 3.months.ago)
+      articles = described_class.seo_boostable(nil, 1.month.ago)
+      expect(articles.first).to eq(nil)
     end
 
-    it "does not return articles when none match based on tag" do
-      search_keyword
-      article.update(featured: true)
-      articles = Article.seo_boostable("woozle-wozzle-20000")
-      expect(articles.size).to eq(0)
+    it "returns articles ordered by organic_page_views_count by tag" do
+      create(:article, score: 30)
+      create(:article, organic_page_views_count: 30, score: 30)
+      top_article = create(:article, organic_page_views_past_month_count: 20, score: 30)
+      top_article.update_column(:cached_tag_list, "good, greatalicious")
+      articles = described_class.seo_boostable("greatalicious")
+      expect(articles.first[0]).to eq(top_article.path)
     end
 
-    it "doesn't return keywords that don't match criteria plucked objects matching keyword query" do
-      search_keyword.update_attributes(google_position: 33) # too high of a position
-      articles = Article.seo_boostable
-      expect(articles.size).to eq(0)
-    end
-
-    it "does not return unpublished articles" do
-      search_keyword
-      articles = Article.seo_boostable
-      article.update(published: false)
-      expect(articles.size).to eq(0)
-    end
-    it "returns empty relation if no articles match" do
-      articles = Article.seo_boostable
+    it "returns nothing if no tagged articles" do
+      create(:article, score: 30)
+      create(:article, organic_page_views_count: 30)
+      top_article = create(:article, organic_page_views_past_month_count: 20, score: 30)
+      top_article.update_column(:cached_tag_list, "good, greatalicious")
+      articles = described_class.seo_boostable("godsdsdsdsgoo")
       expect(articles.size).to eq(0)
     end
   end
 
   it "detects no liquid tag if not used" do
     expect(article.decorate.liquid_tags_used).to eq([])
+  end
+
+  it "returns error message with malformed liquid tags" do
+    body = "{% github /thepracticaldev/dev.to %}"
+    article = build(:article, body_markdown: body, title: "Hello")
+    article.save
+    expect(article.persisted?).to eq(false)
+    expect(article.errors[:base]).to eq(["Invalid Github Repo link"])
   end
 
   it "returns article title length classification" do
@@ -301,6 +338,18 @@ RSpec.describe Article, type: :model do
     expect(article.decorate.title_length_classification).to eq("medium")
     article.title = "0" * 20
     expect(article.decorate.title_length_classification).to eq("short")
+  end
+
+  it "determines that an article has frontmatter" do
+    body = "---\ntitle: Hellohnnnn#{rand(1000)}\npublished: true\ntags: hiring\n---\n\nHello"
+    article.body_markdown = body
+    expect(article.has_frontmatter?).to eq(true)
+  end
+
+  it "determines that an article doesn't have frontmatter" do
+    body = "Hey hey Ho Ho"
+    article.body_markdown = body
+    expect(article.has_frontmatter?).to eq(false)
   end
 
   it "returns stripped canonical url" do
@@ -350,73 +399,40 @@ RSpec.describe Article, type: :model do
     end
   end
 
-  describe "::filter_excluded_tags" do
-    before do
-      create(:article, tags: "hiring")
-    end
-
-    it "exlude #hiring when no argument is given" do
-      expect(described_class.filter_excluded_tags.length).to be(0)
-    end
-
-    it "filters #hiring articles when argument is 'hiring'" do
-      # this is not checking for newest article
-      expect(described_class.filter_excluded_tags("hiring").length).to be(1)
-    end
-
-    it "filters the tag it is asked to filter" do
-      create(:article, tags: "filter")
-      expect(described_class.filter_excluded_tags("filter").length).to be(1)
-    end
-  end
-
-  describe "#flare_tag" do
-    it "returns nil if there is no flare tag" do
-      expect(FlareTag.new(article).tag).to be nil
-    end
-
-    it "returns a flare tag if there is a flare tag in the list" do
-      valid_article = create(:article, tags: "ama")
-      expect(FlareTag.new(valid_article).tag.name).to eq("ama")
-    end
-  end
-
-  describe "#flare_tag_hash" do
-    let (:tag) { create(:tag, name: "ama", bg_color_hex: "#f3f3f3", text_color_hex: "#cccccc") }
-    let (:valid_article) { create(:article, tags: tag.name) }
-
-    it "returns nil if an article doesn't have a flare tag" do
-      expect(FlareTag.new(article).tag_hash).to be nil
-    end
-
-    it "returns a hash with the flare tag's name" do
-      expect(FlareTag.new(valid_article).tag_hash.value?("ama")).to be true
-    end
-
-    it "returns a hash with the flare tag's bg_color_hex" do
-      expect(FlareTag.new(valid_article).tag_hash.value?("#f3f3f3")).to be true
-    end
-
-    it "returns a hash with the flare tag's text_color_hex" do
-      expect(FlareTag.new(valid_article).tag_hash.value?("#cccccc")).to be true
-    end
-  end
-
   describe "before save" do
-    # before do
-    #   article = create(:article, user_id: user.id)
-    # end
     it "assigns path on save" do
       article = create(:article, user_id: user.id)
       expect(article.path).to eq("/#{article.username}/#{article.slug}")
     end
+
     it "assigns cached_user_name on save" do
       article = create(:article, user_id: user.id)
       expect(article.cached_user_name).to eq(article.cached_user_name)
     end
+
     it "assigns cached_user_username on save" do
       article = create(:article, user_id: user.id)
       expect(article.cached_user_username).to eq(article.user_username)
+    end
+
+    it "assigns cached_user on save" do
+      article = create(:article, user_id: user.id)
+      expect(article.cached_user.username).to eq(article.user.username)
+      expect(article.cached_user.name).to eq(article.user.name)
+      expect(article.cached_user.profile_image_url).to eq(article.user.profile_image_url)
+      expect(article.cached_user.profile_image_90).to eq(article.user.profile_image_90)
+      expect(article.cached_user.pro).to eq(article.user.pro?)
+    end
+
+    it "assigns cached_organization on save" do
+      organization = create(:organization)
+      article = create(:article, user_id: user.id, organization_id: organization.id)
+      expect(article.cached_organization.username).to eq(article.organization.username)
+      expect(article.cached_organization.name).to eq(article.organization.name)
+      expect(article.cached_organization.slug).to eq(article.organization.slug)
+      expect(article.cached_organization.profile_image_90).to eq(article.organization.profile_image_90)
+      expect(article.cached_organization.profile_image_url).to eq(article.organization.profile_image_url)
+      expect(article.cached_organization.pro).to be(false)
     end
   end
 
@@ -434,6 +450,19 @@ RSpec.describe Article, type: :model do
       article.main_image = "https://image.com/image.png"
       expect(article.valid?).to eq(true)
     end
+
+    it "does not allow the use of admin-only liquid tags for non-admins" do
+      poll = create(:poll, article_id: article.id)
+      article.body_markdown = "hello hey hey hey {% poll #{poll.id} %}"
+      expect(article.valid?).to eq(false)
+    end
+
+    it "allows admins" do
+      poll = create(:poll, article_id: article.id)
+      article.user.add_role(:admin)
+      article.body_markdown = "hello hey hey hey {% poll #{poll.id} %}"
+      expect(article.valid?).to eq(true)
+    end
   end
 
   it "updates main_image_background_hex_color" do
@@ -445,20 +474,21 @@ RSpec.describe Article, type: :model do
 
   describe "#async_score_calc" do
     context "when published" do
-      before { ActiveJob::Base.queue_adapter = :inline }
-
       let(:article) { build(:article) }
 
       it "updates the hotness score" do
-        article.save
-        article.reload
-        expect(article.hotness_score > 0).to eq(true)
+        perform_enqueued_jobs do
+          article.save
+          expect(article.reload.hotness_score.positive?).to eq(true)
+        end
       end
 
-      it "updates the spaminess score" do
-        article.spaminess_rating = -1
-        article.save
-        expect(article.spaminess_rating).to eq(0)
+      it "updates the spaminess rating" do
+        perform_enqueued_jobs do
+          article.spaminess_rating = -1
+          article.save
+          expect(article.reload.spaminess_rating).to eq(0)
+        end
       end
     end
 
@@ -466,14 +496,18 @@ RSpec.describe Article, type: :model do
       let(:article) { create(:article, published: false) }
 
       it "does not update the hotness score" do
-        article.save
-        expect(article.hotness_score).to eq(0)
+        perform_enqueued_jobs do
+          article.save
+          expect(article.reload.hotness_score).to eq(0)
+        end
       end
 
-      it "does not update the spaminess score" do
-        article.update_column(:spaminess_rating, -1)
-        article.save
-        expect(article.spaminess_rating).to eq(-1)
+      it "does not update the spaminess rating" do
+        perform_enqueued_jobs do
+          article.spaminess_rating = -1
+          article.save
+          expect(article.reload.spaminess_rating).to eq(-1)
+        end
       end
     end
   end
@@ -488,16 +522,36 @@ RSpec.describe Article, type: :model do
     expect(article.class_name).to eq("Article")
   end
 
-  it "does not show year in readable time if not current year" do
-    time_now = Time.current
-    article.published_at = time_now
-    expect(article.readable_publish_date).to eq(time_now.strftime("%b %e"))
+  describe "readable_edit_date" do
+    it "returns nil if article is not edited" do
+      expect(article.readable_edit_date).to be_nil
+    end
+
+    it "does not show year in readable time if not current year" do
+      time_now = Time.current
+      article.edited_at = time_now
+      expect(article.readable_edit_date).to eq(time_now.strftime("%b %e"))
+    end
+
+    it "shows year in readable time if not current year" do
+      article.edited_at = 1.year.ago
+      last_year = 1.year.ago.year % 100
+      expect(article.readable_edit_date.include?("'#{last_year}")).to eq(true)
+    end
   end
 
-  it "shows year in readable time if not current year" do
-    article.published_at = 1.years.ago
-    last_year = 1.year.ago.year % 100
-    expect(article.readable_publish_date.include?("'#{last_year}")).to eq(true)
+  describe "readable_publish_date" do
+    it "does not show year in readable time if not current year" do
+      time_now = Time.current
+      article.published_at = time_now
+      expect(article.readable_publish_date).to eq(time_now.strftime("%b %e"))
+    end
+
+    it "shows year in readable time if not current year" do
+      article.published_at = 1.year.ago
+      last_year = 1.year.ago.year % 100
+      expect(article.readable_publish_date.include?("'#{last_year}")).to eq(true)
+    end
   end
 
   it "is valid as part of a collection" do
@@ -516,6 +570,48 @@ RSpec.describe Article, type: :model do
     end
   end
 
+  describe "published_timestamp" do
+    it "returns empty string if the article is new" do
+      expect(described_class.new.published_timestamp).to eq("")
+    end
+
+    it "returns empty string if the article is not published" do
+      article.update_column(:published, false)
+      expect(article.published_timestamp).to eq("")
+    end
+
+    it "returns the timestamp of the crossposting date over the publishing date" do
+      crossposted_at = 1.week.ago
+      published_at = 1.day.ago
+      article.update_columns(
+        published: true, crossposted_at: crossposted_at, published_at: published_at,
+      )
+      expect(article.published_timestamp).to eq(crossposted_at.utc.iso8601)
+    end
+
+    it "returns the timestamp of the publishing date if there is no crossposting date" do
+      published_at = 1.day.ago
+      article.update_columns(published: true, crossposted_at: nil, published_at: published_at)
+      expect(article.published_timestamp).to eq(published_at.utc.iso8601)
+    end
+  end
+
+  describe "when algolia auto-indexing/removal is triggered" do
+    context "when article is saved" do
+      it "process background auto-indexing" do
+        expect { build(:article, user_id: user.id).save }.to have_enqueued_job.with(kind_of(described_class), "index_or_remove_from_index_where_appropriate").on_queue("algoliasearch")
+      end
+    end
+
+    context "when article is to be deleted" do
+      it "does nothing" do
+        # So that job triggered at creation outside of scope
+        # And test only on destroy, and nothing should be triggered
+        current_article = article
+        expect { current_article.destroy }.not_to have_enqueued_job.with(kind_of(Hash), "index_or_remove_from_index_where_appropriate").on_queue("algoliasearch")
+      end
+    end
+  end
+
   include_examples "#sync_reactions_count", :article
 end
-# rubocop:enable RSpec/ExampleLength, RSpec/MultipleExpectations

@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 # This file is auto-generated from the current state of the database. Instead
 # of editing this file, please use the migrations feature of Active Record to
 # incrementally modify your database, and then regenerate this schema definition.
@@ -10,7 +12,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema.define(version: 20190227163803) do
+ActiveRecord::Schema.define(version: 2019_09_18_104106) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "plpgsql"
 
@@ -31,6 +33,7 @@ ActiveRecord::Schema.define(version: 20190227163803) do
     t.string "utm_medium"
     t.string "utm_source"
     t.string "utm_term"
+    t.index ["to"], name: "index_ahoy_messages_on_to"
     t.index ["token"], name: "index_ahoy_messages_on_token"
     t.index ["user_id", "user_type"], name: "index_ahoy_messages_on_user_id_and_user_type"
   end
@@ -52,11 +55,14 @@ ActiveRecord::Schema.define(version: 20190227163803) do
     t.float "amount_due", default: 0.0
     t.float "amount_paid", default: 0.0
     t.boolean "approved", default: false
+    t.boolean "archived", default: false
     t.boolean "automatically_renew", default: false
     t.text "body_html"
     t.text "body_markdown"
     t.jsonb "boost_states", default: {}, null: false
+    t.text "cached_organization"
     t.string "cached_tag_list"
+    t.text "cached_user"
     t.string "cached_user_name"
     t.string "cached_user_username"
     t.string "canonical_url"
@@ -92,7 +98,11 @@ ActiveRecord::Schema.define(version: 20190227163803) do
     t.string "main_image_background_hex_color", default: "#dddddd"
     t.string "main_tag_name_for_social"
     t.string "name_within_collection"
+    t.integer "organic_page_views_count", default: 0
+    t.integer "organic_page_views_past_month_count", default: 0
+    t.integer "organic_page_views_past_week_count", default: 0
     t.integer "organization_id"
+    t.datetime "originally_published_at"
     t.integer "page_views_count", default: 0
     t.boolean "paid", default: false
     t.string "password"
@@ -128,9 +138,32 @@ ActiveRecord::Schema.define(version: 20190227163803) do
     t.index ["boost_states"], name: "index_articles_on_boost_states", using: :gin
     t.index ["featured_number"], name: "index_articles_on_featured_number"
     t.index ["hotness_score"], name: "index_articles_on_hotness_score"
+    t.index ["path"], name: "index_articles_on_path"
+    t.index ["published"], name: "index_articles_on_published"
     t.index ["published_at"], name: "index_articles_on_published_at"
     t.index ["slug"], name: "index_articles_on_slug"
     t.index ["user_id"], name: "index_articles_on_user_id"
+  end
+
+  create_table "audit_logs", force: :cascade do |t|
+    t.string "category"
+    t.datetime "created_at", null: false
+    t.jsonb "data", default: {}, null: false
+    t.string "roles", array: true
+    t.string "slug"
+    t.datetime "updated_at", null: false
+    t.bigint "user_id"
+    t.index ["data"], name: "index_audit_logs_on_data", using: :gin
+    t.index ["user_id"], name: "index_audit_logs_on_user_id"
+  end
+
+  create_table "backup_data", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "instance_id", null: false
+    t.string "instance_type", null: false
+    t.bigint "instance_user_id"
+    t.jsonb "json_data", null: false
+    t.datetime "updated_at", null: false
   end
 
   create_table "badge_achievements", force: :cascade do |t|
@@ -186,13 +219,16 @@ ActiveRecord::Schema.define(version: 20190227163803) do
   end
 
   create_table "buffer_updates", force: :cascade do |t|
+    t.integer "approver_user_id"
     t.integer "article_id", null: false
     t.text "body_text"
     t.string "buffer_id_code"
     t.string "buffer_profile_id_code"
     t.text "buffer_response", default: "--- {}\n"
+    t.integer "composer_user_id"
     t.datetime "created_at", null: false
     t.string "social_service_name"
+    t.string "status", default: "pending"
     t.integer "tag_id"
     t.datetime "updated_at", null: false
   end
@@ -221,6 +257,27 @@ ActiveRecord::Schema.define(version: 20190227163803) do
     t.string "slug"
     t.string "status", default: "active"
     t.datetime "updated_at", null: false
+  end
+
+  create_table "classified_listings", force: :cascade do |t|
+    t.text "body_markdown"
+    t.datetime "bumped_at"
+    t.string "cached_tag_list"
+    t.string "category"
+    t.boolean "contact_via_connect", default: false
+    t.datetime "created_at", null: false
+    t.datetime "expires_at"
+    t.datetime "last_buffered"
+    t.string "location"
+    t.bigint "organization_id"
+    t.text "processed_html"
+    t.boolean "published"
+    t.string "slug"
+    t.string "title"
+    t.datetime "updated_at", null: false
+    t.bigint "user_id"
+    t.index ["organization_id"], name: "index_classified_listings_on_organization_id"
+    t.index ["user_id"], name: "index_classified_listings_on_user_id"
   end
 
   create_table "collections", id: :serial, force: :cascade do |t|
@@ -259,6 +316,24 @@ ActiveRecord::Schema.define(version: 20190227163803) do
     t.datetime "updated_at", null: false
     t.integer "user_id"
     t.index ["ancestry"], name: "index_comments_on_ancestry"
+    t.index ["commentable_id", "commentable_type"], name: "index_comments_on_commentable_id_and_commentable_type"
+    t.index ["created_at"], name: "index_comments_on_created_at"
+    t.index ["score"], name: "index_comments_on_score"
+    t.index ["user_id"], name: "index_comments_on_user_id"
+  end
+
+  create_table "credits", force: :cascade do |t|
+    t.float "cost", default: 0.0
+    t.datetime "created_at", null: false
+    t.bigint "organization_id"
+    t.bigint "purchase_id"
+    t.string "purchase_type"
+    t.boolean "spent", default: false
+    t.datetime "spent_at"
+    t.datetime "updated_at", null: false
+    t.bigint "user_id"
+    t.index ["purchase_id", "purchase_type"], name: "index_credits_on_purchase_id_and_purchase_type"
+    t.index ["spent"], name: "index_credits_on_spent"
   end
 
   create_table "delayed_jobs", id: :serial, force: :cascade do |t|
@@ -276,6 +351,19 @@ ActiveRecord::Schema.define(version: 20190227163803) do
     t.index ["priority", "run_at"], name: "delayed_jobs_priority"
   end
 
+  create_table "display_ad_events", force: :cascade do |t|
+    t.string "category"
+    t.bigint "context_id"
+    t.string "context_type"
+    t.integer "counts_for", default: 1
+    t.datetime "created_at", null: false
+    t.integer "display_ad_id"
+    t.datetime "updated_at", null: false
+    t.integer "user_id"
+    t.index ["display_ad_id"], name: "index_display_ad_events_on_display_ad_id"
+    t.index ["user_id"], name: "index_display_ad_events_on_user_id"
+  end
+
   create_table "display_ads", force: :cascade do |t|
     t.boolean "approved", default: false
     t.text "body_markdown"
@@ -288,6 +376,7 @@ ActiveRecord::Schema.define(version: 20190227163803) do
     t.string "placement_area"
     t.text "processed_html"
     t.boolean "published", default: false
+    t.float "success_rate", default: 0.0
     t.datetime "updated_at", null: false
   end
 
@@ -334,7 +423,9 @@ ActiveRecord::Schema.define(version: 20190227163803) do
     t.integer "follower_id", null: false
     t.string "follower_type", null: false
     t.float "points", default: 1.0
+    t.string "subscription_status", default: "all_articles", null: false
     t.datetime "updated_at"
+    t.index ["created_at"], name: "index_follows_on_created_at"
     t.index ["followable_id", "followable_type"], name: "fk_followables"
     t.index ["follower_id", "follower_type"], name: "fk_follows"
   end
@@ -405,6 +496,8 @@ ActiveRecord::Schema.define(version: 20190227163803) do
     t.string "uid"
     t.datetime "updated_at", null: false
     t.integer "user_id"
+    t.index ["provider", "uid"], name: "index_identities_on_provider_and_uid", unique: true
+    t.index ["provider", "user_id"], name: "index_identities_on_provider_and_user_id", unique: true
   end
 
   create_table "job_opportunities", force: :cascade do |t|
@@ -430,17 +523,6 @@ ActiveRecord::Schema.define(version: 20190227163803) do
     t.integer "user_id"
   end
 
-  create_table "mentor_relationships", force: :cascade do |t|
-    t.boolean "active", default: true
-    t.datetime "created_at", null: false
-    t.integer "mentee_id", null: false
-    t.integer "mentor_id", null: false
-    t.datetime "updated_at", null: false
-    t.index ["mentee_id", "mentor_id"], name: "index_mentor_relationships_on_mentee_id_and_mentor_id", unique: true
-    t.index ["mentee_id"], name: "index_mentor_relationships_on_mentee_id"
-    t.index ["mentor_id"], name: "index_mentor_relationships_on_mentor_id"
-  end
-
   create_table "messages", force: :cascade do |t|
     t.bigint "chat_channel_id", null: false
     t.datetime "created_at", null: false
@@ -462,6 +544,16 @@ ActiveRecord::Schema.define(version: 20190227163803) do
     t.datetime "updated_at", null: false
   end
 
+  create_table "notification_subscriptions", force: :cascade do |t|
+    t.text "config", default: "all_comments", null: false
+    t.datetime "created_at", null: false
+    t.bigint "notifiable_id", null: false
+    t.string "notifiable_type", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index ["notifiable_id", "notifiable_type", "config"], name: "index_notification_subscriptions_on_notifiable_and_config"
+  end
+
   create_table "notifications", id: :serial, force: :cascade do |t|
     t.string "action"
     t.datetime "created_at", null: false
@@ -476,21 +568,82 @@ ActiveRecord::Schema.define(version: 20190227163803) do
     t.index ["json_data"], name: "index_notifications_on_json_data", using: :gin
     t.index ["notifiable_id"], name: "index_notifications_on_notifiable_id"
     t.index ["notifiable_type"], name: "index_notifications_on_notifiable_type"
+    t.index ["notified_at"], name: "index_notifications_on_notified_at"
+    t.index ["organization_id", "notifiable_id", "notifiable_type", "action"], name: "index_notifications_on_org_notifiable_and_action_not_null", unique: true, where: "(action IS NOT NULL)"
+    t.index ["organization_id", "notifiable_id", "notifiable_type"], name: "index_notifications_on_org_notifiable_action_is_null", unique: true, where: "(action IS NULL)"
+    t.index ["organization_id"], name: "index_notifications_on_organization_id"
+    t.index ["user_id", "notifiable_id", "notifiable_type", "action"], name: "index_notifications_on_user_notifiable_and_action_not_null", unique: true, where: "(action IS NOT NULL)"
+    t.index ["user_id", "notifiable_id", "notifiable_type"], name: "index_notifications_on_user_notifiable_action_is_null", unique: true, where: "(action IS NULL)"
     t.index ["user_id"], name: "index_notifications_on_user_id"
+  end
+
+  create_table "oauth_access_grants", force: :cascade do |t|
+    t.bigint "application_id", null: false
+    t.datetime "created_at", null: false
+    t.integer "expires_in", null: false
+    t.text "redirect_uri", null: false
+    t.bigint "resource_owner_id", null: false
+    t.datetime "revoked_at"
+    t.string "scopes"
+    t.string "token", null: false
+    t.index ["application_id"], name: "index_oauth_access_grants_on_application_id"
+    t.index ["resource_owner_id"], name: "index_oauth_access_grants_on_resource_owner_id"
+    t.index ["token"], name: "index_oauth_access_grants_on_token", unique: true
+  end
+
+  create_table "oauth_access_tokens", force: :cascade do |t|
+    t.bigint "application_id", null: false
+    t.datetime "created_at", null: false
+    t.integer "expires_in"
+    t.string "previous_refresh_token", default: "", null: false
+    t.string "refresh_token"
+    t.bigint "resource_owner_id"
+    t.datetime "revoked_at"
+    t.string "scopes"
+    t.string "token", null: false
+    t.index ["application_id"], name: "index_oauth_access_tokens_on_application_id"
+    t.index ["refresh_token"], name: "index_oauth_access_tokens_on_refresh_token", unique: true
+    t.index ["resource_owner_id"], name: "index_oauth_access_tokens_on_resource_owner_id"
+    t.index ["token"], name: "index_oauth_access_tokens_on_token", unique: true
+  end
+
+  create_table "oauth_applications", force: :cascade do |t|
+    t.boolean "confidential", default: true, null: false
+    t.datetime "created_at", null: false
+    t.string "name", null: false
+    t.text "redirect_uri", null: false
+    t.string "scopes", default: "", null: false
+    t.string "secret", null: false
+    t.string "uid", null: false
+    t.datetime "updated_at", null: false
+    t.index ["uid"], name: "index_oauth_applications_on_uid", unique: true
+  end
+
+  create_table "organization_memberships", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "organization_id", null: false
+    t.string "type_of_user", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.string "user_title"
+    t.index ["user_id", "organization_id"], name: "index_organization_memberships_on_user_id_and_organization_id", unique: true
   end
 
   create_table "organizations", id: :serial, force: :cascade do |t|
     t.string "address"
     t.boolean "approved", default: false
+    t.integer "articles_count", default: 0, null: false
     t.string "bg_color_hex"
     t.string "city"
     t.string "company_size"
     t.string "country"
     t.datetime "created_at", null: false
+    t.integer "credits_count", default: 0, null: false
     t.text "cta_body_markdown"
     t.string "cta_button_text"
     t.string "cta_button_url"
     t.text "cta_processed_html"
+    t.string "dark_nav_image"
     t.string "email"
     t.string "github_username"
     t.string "jobs_email"
@@ -506,6 +659,7 @@ ActiveRecord::Schema.define(version: 20190227163803) do
     t.text "proof"
     t.string "secret"
     t.string "slug"
+    t.integer "spent_credits_count", default: 0, null: false
     t.string "state"
     t.string "story"
     t.text "summary"
@@ -513,10 +667,45 @@ ActiveRecord::Schema.define(version: 20190227163803) do
     t.string "tech_stack"
     t.string "text_color_hex"
     t.string "twitter_username"
+    t.integer "unspent_credits_count", default: 0, null: false
     t.datetime "updated_at", null: false
     t.string "url"
     t.string "zip_code"
     t.index ["slug"], name: "index_organizations_on_slug", unique: true
+  end
+
+  create_table "page_views", force: :cascade do |t|
+    t.bigint "article_id"
+    t.integer "counts_for_number_of_views", default: 1
+    t.datetime "created_at", null: false
+    t.string "domain"
+    t.string "path"
+    t.string "referrer"
+    t.integer "time_tracked_in_seconds", default: 15
+    t.datetime "updated_at", null: false
+    t.string "user_agent"
+    t.bigint "user_id"
+    t.index ["article_id"], name: "index_page_views_on_article_id"
+    t.index ["created_at"], name: "index_page_views_on_created_at"
+    t.index ["domain"], name: "index_page_views_on_domain"
+    t.index ["user_id"], name: "index_page_views_on_user_id"
+  end
+
+  create_table "pages", force: :cascade do |t|
+    t.text "body_html"
+    t.text "body_markdown"
+    t.datetime "created_at", null: false
+    t.string "description"
+    t.string "group"
+    t.integer "group_order_number"
+    t.boolean "is_top_level_path", default: false
+    t.text "processed_html"
+    t.string "slug"
+    t.string "social_image"
+    t.string "template"
+    t.string "title"
+    t.datetime "updated_at", null: false
+    t.index ["slug"], name: "index_pages_on_slug", unique: true
   end
 
   create_table "podcast_episodes", id: :serial, force: :cascade do |t|
@@ -527,43 +716,118 @@ ActiveRecord::Schema.define(version: 20190227163803) do
     t.integer "duration_in_seconds"
     t.boolean "featured", default: true
     t.integer "featured_number"
-    t.string "guid"
+    t.string "guid", null: false
+    t.boolean "https", default: true
     t.string "image"
     t.string "itunes_url"
-    t.string "media_url"
+    t.string "media_url", null: false
     t.string "order_key"
     t.integer "podcast_id"
     t.text "processed_html"
     t.datetime "published_at"
     t.text "quote"
+    t.boolean "reachable", default: true
     t.integer "reactions_count", default: 0, null: false
-    t.string "slug"
+    t.string "slug", null: false
     t.string "social_image"
+    t.string "status_notice"
     t.string "subtitle"
     t.text "summary"
-    t.string "title"
+    t.string "title", null: false
     t.datetime "updated_at", null: false
     t.string "website_url"
+    t.index ["guid"], name: "index_podcast_episodes_on_guid", unique: true
+    t.index ["media_url"], name: "index_podcast_episodes_on_media_url", unique: true
+    t.index ["podcast_id"], name: "index_podcast_episodes_on_podcast_id"
   end
 
   create_table "podcasts", id: :serial, force: :cascade do |t|
     t.string "android_url"
     t.datetime "created_at", null: false
     t.text "description"
-    t.string "feed_url"
-    t.string "image"
+    t.string "feed_url", null: false
+    t.string "image", null: false
     t.string "itunes_url"
-    t.string "main_color_hex"
+    t.string "main_color_hex", null: false
     t.string "overcast_url"
     t.string "pattern_image"
-    t.string "slug"
+    t.boolean "published", default: false
+    t.boolean "reachable", default: true
+    t.string "slug", null: false
     t.string "soundcloud_url"
     t.text "status_notice", default: ""
-    t.string "title"
+    t.string "title", null: false
     t.string "twitter_username"
     t.boolean "unique_website_url?", default: true
     t.datetime "updated_at", null: false
     t.string "website_url"
+    t.index ["feed_url"], name: "index_podcasts_on_feed_url", unique: true
+    t.index ["slug"], name: "index_podcasts_on_slug", unique: true
+  end
+
+  create_table "poll_options", force: :cascade do |t|
+    t.boolean "counts_in_tabulation"
+    t.datetime "created_at", null: false
+    t.string "markdown"
+    t.bigint "poll_id"
+    t.integer "poll_votes_count", default: 0, null: false
+    t.string "processed_html"
+    t.datetime "updated_at", null: false
+  end
+
+  create_table "poll_skips", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "poll_id"
+    t.datetime "updated_at", null: false
+    t.bigint "user_id"
+    t.index ["poll_id", "user_id"], name: "index_poll_skips_on_poll_and_user", unique: true
+  end
+
+  create_table "poll_votes", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "poll_id", null: false
+    t.bigint "poll_option_id", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index ["poll_option_id", "user_id"], name: "index_poll_votes_on_poll_option_and_user", unique: true
+  end
+
+  create_table "polls", force: :cascade do |t|
+    t.boolean "allow_multiple_selections", default: false
+    t.bigint "article_id"
+    t.datetime "created_at", null: false
+    t.integer "poll_options_count", default: 0, null: false
+    t.integer "poll_skips_count", default: 0, null: false
+    t.integer "poll_votes_count", default: 0, null: false
+    t.string "prompt_html"
+    t.string "prompt_markdown"
+    t.datetime "updated_at", null: false
+  end
+
+  create_table "pro_memberships", force: :cascade do |t|
+    t.boolean "auto_recharge", default: false, null: false
+    t.datetime "created_at", null: false
+    t.datetime "expiration_notification_at"
+    t.integer "expiration_notifications_count", default: 0, null: false
+    t.datetime "expires_at", null: false
+    t.string "status", default: "active"
+    t.datetime "updated_at", null: false
+    t.bigint "user_id"
+    t.index ["auto_recharge"], name: "index_pro_memberships_on_auto_recharge"
+    t.index ["expires_at"], name: "index_pro_memberships_on_expires_at"
+    t.index ["status"], name: "index_pro_memberships_on_status"
+    t.index ["user_id"], name: "index_pro_memberships_on_user_id"
+  end
+
+  create_table "profile_pins", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "pinnable_id"
+    t.string "pinnable_type"
+    t.bigint "profile_id"
+    t.string "profile_type"
+    t.datetime "updated_at", null: false
+    t.index ["pinnable_id"], name: "index_profile_pins_on_pinnable_id"
+    t.index ["profile_id"], name: "index_profile_pins_on_profile_id"
   end
 
   create_table "push_notification_subscriptions", force: :cascade do |t|
@@ -598,6 +862,8 @@ ActiveRecord::Schema.define(version: 20190227163803) do
     t.datetime "updated_at", null: false
     t.integer "user_id"
     t.index ["category"], name: "index_reactions_on_category"
+    t.index ["created_at"], name: "index_reactions_on_created_at"
+    t.index ["points"], name: "index_reactions_on_points"
     t.index ["reactable_id"], name: "index_reactions_on_reactable_id"
     t.index ["reactable_type"], name: "index_reactions_on_reactable_type"
     t.index ["user_id"], name: "index_reactions_on_user_id"
@@ -635,6 +901,29 @@ ActiveRecord::Schema.define(version: 20190227163803) do
     t.index ["google_result_path"], name: "index_search_keywords_on_google_result_path"
   end
 
+  create_table "sponsorships", force: :cascade do |t|
+    t.text "blurb_html"
+    t.datetime "created_at", null: false
+    t.datetime "expires_at"
+    t.integer "featured_number", default: 0, null: false
+    t.text "instructions"
+    t.datetime "instructions_updated_at"
+    t.string "level", null: false
+    t.bigint "organization_id"
+    t.bigint "sponsorable_id"
+    t.string "sponsorable_type"
+    t.string "status", default: "none", null: false
+    t.string "tagline"
+    t.datetime "updated_at", null: false
+    t.string "url"
+    t.bigint "user_id"
+    t.index ["level"], name: "index_sponsorships_on_level"
+    t.index ["organization_id"], name: "index_sponsorships_on_organization_id"
+    t.index ["sponsorable_id", "sponsorable_type"], name: "index_sponsorships_on_sponsorable_id_and_sponsorable_type"
+    t.index ["status"], name: "index_sponsorships_on_status"
+    t.index ["user_id"], name: "index_sponsorships_on_user_id"
+  end
+
   create_table "tag_adjustments", force: :cascade do |t|
     t.string "adjustment_type"
     t.integer "article_id"
@@ -668,8 +957,10 @@ ActiveRecord::Schema.define(version: 20190227163803) do
 
   create_table "tags", id: :serial, force: :cascade do |t|
     t.string "alias_for"
+    t.integer "badge_id"
     t.string "bg_color_hex"
     t.string "buffer_profile_id_code"
+    t.string "category", default: "uncategorized", null: false
     t.datetime "created_at"
     t.integer "hotness_score", default: 0
     t.string "keywords_for_search"
@@ -732,23 +1023,29 @@ ActiveRecord::Schema.define(version: 20190227163803) do
     t.string "behance_url"
     t.string "bg_color_hex"
     t.boolean "checked_code_of_conduct", default: false
+    t.boolean "checked_terms_and_conditions", default: false
     t.integer "comments_count", default: 0, null: false
+    t.string "config_font", default: "default"
+    t.string "config_theme", default: "default"
     t.datetime "confirmation_sent_at"
     t.string "confirmation_token"
     t.datetime "confirmed_at"
     t.boolean "contact_consent", default: false
     t.datetime "created_at", null: false
+    t.integer "credits_count", default: 0, null: false
     t.datetime "current_sign_in_at"
     t.inet "current_sign_in_ip"
     t.string "currently_hacking_on"
     t.string "currently_learning"
+    t.string "currently_streaming_on"
     t.boolean "display_sponsors", default: true
     t.string "dribbble_url"
     t.string "editor_version", default: "v1"
     t.string "education"
-    t.string "email", default: "", null: false
+    t.string "email"
     t.boolean "email_badge_notifications", default: true
     t.boolean "email_comment_notifications", default: true
+    t.boolean "email_community_mod_newsletter", default: false
     t.boolean "email_connect_messages", default: true
     t.boolean "email_digest_periodic", default: true, null: false
     t.boolean "email_follower_notifications", default: true
@@ -756,6 +1053,7 @@ ActiveRecord::Schema.define(version: 20190227163803) do
     t.boolean "email_mention_notifications", default: true
     t.boolean "email_newsletter", default: true
     t.boolean "email_public", default: false
+    t.boolean "email_tag_mod_newsletter", default: false
     t.boolean "email_unread_notifications", default: true
     t.string "employer_name"
     t.string "employer_url"
@@ -768,6 +1066,7 @@ ActiveRecord::Schema.define(version: 20190227163803) do
     t.boolean "feed_admin_publish_permission", default: true
     t.datetime "feed_fetched_at", default: "2017-01-01 05:00:00"
     t.boolean "feed_mark_canonical", default: false
+    t.boolean "feed_referential_link", default: true, null: false
     t.string "feed_url"
     t.integer "following_orgs_count", default: 0, null: false
     t.integer "following_tags_count", default: 0, null: false
@@ -776,12 +1075,16 @@ ActiveRecord::Schema.define(version: 20190227163803) do
     t.datetime "github_repos_updated_at", default: "2017-01-01 05:00:00"
     t.string "github_username"
     t.string "gitlab_url"
+    t.string "inbox_guidelines"
+    t.string "inbox_type", default: "private"
+    t.string "instagram_url"
     t.jsonb "language_settings", default: {}, null: false
     t.datetime "last_article_at", default: "2017-01-01 05:00:00"
     t.datetime "last_comment_at", default: "2017-01-01 05:00:00"
     t.datetime "last_followed_at"
     t.datetime "last_moderation_notification", default: "2017-01-01 05:00:00"
     t.datetime "last_notification_activity"
+    t.string "last_onboarding_page"
     t.datetime "last_sign_in_at"
     t.inet "last_sign_in_ip"
     t.string "linkedin_url"
@@ -791,21 +1094,19 @@ ActiveRecord::Schema.define(version: 20190227163803) do
     t.string "mastodon_url"
     t.string "medium_url"
     t.datetime "membership_started_at"
-    t.text "mentee_description"
-    t.datetime "mentee_form_updated_at"
-    t.text "mentor_description"
-    t.datetime "mentor_form_updated_at"
     t.boolean "mobile_comment_notifications", default: true
+    t.boolean "mod_roundrobin_notifications", default: true
     t.integer "monthly_dues", default: 0
     t.string "mostly_work_with"
     t.string "name"
-    t.boolean "offering_mentorship"
     t.string "old_old_username"
     t.string "old_username"
+    t.string "onboarding_checklist", default: [], array: true
     t.datetime "onboarding_package_form_submmitted_at"
     t.boolean "onboarding_package_fulfilled", default: false
     t.boolean "onboarding_package_requested", default: false
     t.boolean "onboarding_package_requested_again", default: false
+    t.string "onboarding_variant_version", default: "0"
     t.boolean "org_admin", default: false
     t.integer "organization_id"
     t.boolean "permit_adjacent_sponsors", default: true
@@ -823,7 +1124,6 @@ ActiveRecord::Schema.define(version: 20190227163803) do
     t.boolean "saw_onboarding", default: true
     t.integer "score", default: 0
     t.string "secret"
-    t.boolean "seeking_mentorship"
     t.string "shipping_address"
     t.string "shipping_address_line_2"
     t.string "shipping_city"
@@ -841,6 +1141,7 @@ ActiveRecord::Schema.define(version: 20190227163803) do
     t.string "signup_refer_code"
     t.string "signup_referring_site"
     t.string "specialty"
+    t.integer "spent_credits_count", default: 0, null: false
     t.string "stackoverflow_url"
     t.string "stripe_id_code"
     t.text "summary"
@@ -848,19 +1149,25 @@ ActiveRecord::Schema.define(version: 20190227163803) do
     t.string "text_color_hex"
     t.string "text_only_name"
     t.string "top_languages"
+    t.string "twitch_url"
+    t.string "twitch_username"
     t.datetime "twitter_created_at"
     t.integer "twitter_followers_count"
     t.integer "twitter_following_count"
     t.string "twitter_username"
     t.string "unconfirmed_email"
+    t.integer "unspent_credits_count", default: 0, null: false
     t.datetime "updated_at", null: false
     t.string "username"
     t.string "website_url"
     t.datetime "workshop_expiration"
     t.index ["confirmation_token"], name: "index_users_on_confirmation_token", unique: true
+    t.index ["email"], name: "index_users_on_email", unique: true
+    t.index ["github_username"], name: "index_users_on_github_username", unique: true
     t.index ["language_settings"], name: "index_users_on_language_settings", using: :gin
     t.index ["organization_id"], name: "index_users_on_organization_id"
     t.index ["reset_password_token"], name: "index_users_on_reset_password_token", unique: true
+    t.index ["twitter_username"], name: "index_users_on_twitter_username", unique: true
     t.index ["username"], name: "index_users_on_username", unique: true
   end
 
@@ -870,11 +1177,33 @@ ActiveRecord::Schema.define(version: 20190227163803) do
     t.index ["user_id", "role_id"], name: "index_users_roles_on_user_id_and_role_id"
   end
 
+  create_table "webhook_endpoints", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "events", null: false, array: true
+    t.bigint "oauth_application_id"
+    t.string "source"
+    t.string "target_url", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index ["events"], name: "index_webhook_endpoints_on_events"
+    t.index ["oauth_application_id"], name: "index_webhook_endpoints_on_oauth_application_id"
+    t.index ["user_id"], name: "index_webhook_endpoints_on_user_id"
+  end
+
+  add_foreign_key "audit_logs", "users"
   add_foreign_key "badge_achievements", "badges"
   add_foreign_key "badge_achievements", "users"
   add_foreign_key "chat_channel_memberships", "chat_channels"
   add_foreign_key "chat_channel_memberships", "users"
   add_foreign_key "messages", "chat_channels"
   add_foreign_key "messages", "users"
+  add_foreign_key "oauth_access_grants", "oauth_applications", column: "application_id"
+  add_foreign_key "oauth_access_grants", "users", column: "resource_owner_id"
+  add_foreign_key "oauth_access_tokens", "oauth_applications", column: "application_id"
+  add_foreign_key "oauth_access_tokens", "users", column: "resource_owner_id"
   add_foreign_key "push_notification_subscriptions", "users"
+  add_foreign_key "sponsorships", "organizations"
+  add_foreign_key "sponsorships", "users"
+  add_foreign_key "webhook_endpoints", "oauth_applications"
+  add_foreign_key "webhook_endpoints", "users"
 end

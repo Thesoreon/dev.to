@@ -1,50 +1,55 @@
 class Comment < ApplicationRecord
   has_ancestry
+  resourcify
   include AlgoliaSearch
   include Reactable
   belongs_to :commentable, polymorphic: true
   counter_culture :commentable
   belongs_to :user
   counter_culture :user
-  has_many :mentions, as: :mentionable, dependent: :destroy
+  has_many :mentions, as: :mentionable, inverse_of: :mentionable, dependent: :destroy
+  has_many :notifications, as: :notifiable, inverse_of: :notifiable, dependent: :delete_all
+  has_many :notification_subscriptions, as: :notifiable, inverse_of: :notifiable, dependent: :destroy
 
-  validates :body_markdown, presence: true, length: { in: 1..25000 },
+  validates :body_markdown, presence: true, length: { in: 1..25_000 },
                             uniqueness: { scope: %i[user_id
                                                     ancestry
                                                     commentable_id
                                                     commentable_type] }
   validates :commentable_id, presence: true
-  validates :commentable_type, inclusion: { in: %w(Article PodcastEpisode) }
+  validates :commentable_type, inclusion: { in: %w[Article PodcastEpisode] }
   validates :user_id, presence: true
 
   after_create   :after_create_checks
   after_save     :calculate_score
   after_save     :bust_cache
   after_save     :synchronous_bust
+  after_destroy  :after_destroy_actions
   before_destroy :before_destroy_actions
   after_create   :send_email_notification, if: :should_send_email_notification?
   after_create   :create_first_reaction
   after_create   :send_to_moderator
   before_save    :set_markdown_character_count, if: :body_markdown
   before_create  :adjust_comment_parent_based_on_depth
-  after_update   :update_notifications, if: Proc.new { |comment| comment.saved_changes.include? "body_markdown" }
+  after_update   :update_notifications, if: proc { |comment| comment.saved_changes.include? "body_markdown" }
   after_update   :remove_notifications, if: :deleted
+  after_update   :update_descendant_notifications, if: :deleted
   before_validation :evaluate_markdown, if: -> { body_markdown && commentable }
   validate :permissions, if: :commentable
 
   alias touch_by_reaction save
 
-  algoliasearch per_environment: true, enqueue: :trigger_delayed_index do
+  algoliasearch per_environment: true, enqueue: :trigger_index do
     attribute :id
     add_index "ordered_comments",
-                  id: :index_id,
-                  per_environment: true,
-                  enqueue: :trigger_delayed_index do
+              id: :index_id,
+              per_environment: true,
+              enqueue: :trigger_index do
       attributes :id, :user_id, :commentable_id, :commentable_type, :id_code_generated, :path,
-        :id_code, :readable_publish_date, :parent_id, :positive_reactions_count, :created_at
+                 :id_code, :readable_publish_date, :parent_id, :positive_reactions_count, :created_at
       attribute :body_html do
         HTML_Truncator.truncate(processed_html,
-          500, ellipsis: '<a class="comment-read-more" href="' + path + '">... Read Entire Comment</a>')
+                                500, ellipsis: '<a class="comment-read-more" href="' + path + '">... Read Entire Comment</a>')
       end
       attribute :url do
         path
@@ -92,13 +97,14 @@ class Comment < ApplicationRecord
     end
   end
 
-  def self.trigger_delayed_index(record, remove)
-    if remove
-      record.delay.remove_from_index! if record&.persisted?
-    elsif record.deleted == false
-      record.delay.index!
+  def self.trigger_index(record, remove)
+    # record is removed from index synchronously in before_destroy_actions
+    return if remove
+
+    if record.deleted == false
+      AlgoliaSearch::AlgoliaJob.perform_later(record, "index!")
     else
-      record.remove_algolia_index
+      AlgoliaSearch::AlgoliaJob.perform_later(record, "remove_algolia_index")
     end
   end
 
@@ -113,8 +119,7 @@ class Comment < ApplicationRecord
 
   def remove_algolia_index
     remove_from_index!
-    index = Algolia::Index.new("ordered_comments_#{Rails.env}")
-    index.delete_object("comments-#{id}")
+    Search::RemoveFromIndexJob.perform_now("ordered_comments_#{Rails.env}", index_id)
   end
 
   def index_id
@@ -122,12 +127,10 @@ class Comment < ApplicationRecord
   end
 
   def self.rooted_on(commentable_id, commentable_type)
-    includes(:user, :commentable).
+    includes(:user).
       select(:id, :user_id, :commentable_type, :commentable_id,
              :deleted, :created_at, :processed_html, :ancestry, :updated_at, :score).
-      where(commentable_id: commentable_id,
-            ancestry: nil,
-            commentable_type: commentable_type)
+      where(commentable_id: commentable_id, ancestry: nil, commentable_type: commentable_type)
   end
 
   def self.tree_for(commentable, limit = 0)
@@ -164,8 +167,11 @@ class Comment < ApplicationRecord
     end.join
   end
 
-  def title
-    ActionController::Base.helpers.truncate(ActionController::Base.helpers.strip_tags(processed_html), length: 60)
+  def title(length = 80)
+    return "[deleted]" if deleted
+
+    text = ActionController::Base.helpers.strip_tags(processed_html).strip
+    HTMLEntities.new.decode ActionController::Base.helpers.truncate(text, length: length).gsub("&#39;", "'").gsub("&amp;", "&")
   end
 
   def video
@@ -180,9 +186,8 @@ class Comment < ApplicationRecord
     end
   end
 
-  def self.comment_async_bust(commentable, username)
-    CacheBuster.new.bust_comment(commentable, username)
-    commentable.index!
+  def remove_notifications
+    Notification.remove_all_without_delay(notifiable_ids: id, notifiable_type: "Comment")
   end
 
   private
@@ -191,54 +196,51 @@ class Comment < ApplicationRecord
     Notification.update_notifications(self)
   end
 
-  def remove_notifications
-    Notification.remove_all_without_delay(notifiable_id: id, notifiable_type: "Comment")
-    Notification.remove_all_without_delay(notifiable_id: id, notifiable_type: "Comment", action: "Moderation")
-    Notification.remove_all_without_delay(notifiable_id: id, notifiable_type: "Comment", action: "Reaction")
+  def update_descendant_notifications
+    return unless has_children?
+
+    Comment.where(id: descendant_ids).find_each do |comment|
+      Notification.update_notifications(comment)
+    end
   end
 
   def send_to_moderator
-    return if user && user.comments_count > 10
+    return if user && user.comments_count > 2
 
     Notification.send_moderation_notification(self)
   end
 
   def evaluate_markdown
-    fixed_body_markdown = MarkdownFixer.modify_hr_tags(body_markdown)
+    fixed_body_markdown = MarkdownFixer.fix_for_comment(body_markdown)
     parsed_markdown = MarkdownParser.new(fixed_body_markdown)
-    self.processed_html = parsed_markdown.finalize
+    self.processed_html = parsed_markdown.finalize(link_attributes: { rel: "nofollow" })
     wrap_timestamps_if_video_present!
     shorten_urls!
   end
 
   def adjust_comment_parent_based_on_depth
-    if parent && (parent.depth > 1 && parent.has_children?)
-      self.parent_id = parent.descendant_ids.last
-    end
+    self.parent_id = parent.descendant_ids.last if parent && (parent.depth > 1 && parent.has_children?)
   end
 
   def wrap_timestamps_if_video_present!
     return unless commentable_type != "PodcastEpisode" && commentable.video.present?
 
-    self.processed_html = processed_html.gsub(/(([0-9]:)?)(([0-5][0-9]|[0-9])?):[0-5][0-9]/) { |s| "<a href='#{commentable.path}?t=#{s}'>#{s}</a>" }
+    self.processed_html = processed_html.gsub(/(([0-9]:)?)(([0-5][0-9]|[0-9])?):[0-5][0-9]/) { |string| "<a href='#{commentable.path}?t=#{string}'>#{string}</a>" }
   end
 
   def shorten_urls!
     doc = Nokogiri::HTML.parse(processed_html)
-    doc.css("a").each do |a|
-      unless a.to_s.include?("<img") || a.attr("class")&.include?("ltag")
-        a.content = strip_url(a.content) unless a.to_s.include?("<img")
+    doc.css("a").each do |anchor|
+      unless anchor.to_s.include?("<img") || anchor.attr("class")&.include?("ltag")
+        anchor.content = strip_url(anchor.content) unless anchor.to_s.include?("<img")
       end
     end
     self.processed_html = doc.to_html.html_safe
   end
 
   def calculate_score
-    update_column(:score, BlackBox.comment_quality_score(self))
-    update_column(:spaminess_rating, BlackBox.calculate_spaminess(self))
-    root.save unless is_root?
+    Comments::CalculateScoreJob.perform_later(id)
   end
-  handle_asynchronously :calculate_score
 
   def after_create_checks
     create_id_code
@@ -246,53 +248,52 @@ class Comment < ApplicationRecord
   end
 
   def create_id_code
-    update_column(:id_code, id.to_s(26))
+    Comments::CreateIdCodeJob.perform_later(id)
   end
-  handle_asynchronously :create_id_code
 
   def touch_user
-    user.touch
-    user.touch(:last_comment_at)
+    Comments::TouchUserJob.perform_later(id)
   end
-  handle_asynchronously :touch_user
 
   def expire_root_fragment
     root.touch
   end
 
   def create_first_reaction
-    Reaction.create(user_id: user_id,
-                    reactable_id: id,
-                    reactable_type: "Comment",
-                    category: "like")
+    Comments::CreateFirstReactionJob.perform_later(id)
   end
-  handle_asynchronously :create_first_reaction
+
+  def after_destroy_actions
+    Users::BustCacheJob.perform_now(user_id)
+    user.touch(:last_comment_at)
+  end
 
   def before_destroy_actions
     commentable.touch(:last_comment_at) if commentable.respond_to?(:last_comment_at)
-    remove_notifications
+    ancestors.update_all(updated_at: Time.current)
     bust_cache_without_delay
     remove_algolia_index
   end
 
-  def bust_cache
-    Comment.comment_async_bust(commentable, user.username)
-    cache_buster = CacheBuster.new
-    cache_buster.bust("#{commentable.path}/comments") if commentable
+  def bust_cache_without_delay
+    Comments::BustCacheJob.perform_now(id)
   end
-  handle_asynchronously :bust_cache
+
+  def bust_cache
+    Comments::BustCacheJob.perform_later(id)
+  end
 
   def synchronous_bust
     commentable.touch(:last_comment_at) if commentable.respond_to?(:last_comment_at)
+    user.touch(:last_comment_at)
     cache_buster = CacheBuster.new
     cache_buster.bust(commentable.path.to_s) if commentable
     expire_root_fragment
   end
 
   def send_email_notification
-    NotifyMailer.new_reply_email(self).deliver
+    Comments::SendEmailNotificationJob.perform_later(id)
   end
-  handle_asynchronously :send_email_notification
 
   def should_send_email_notification?
     parent_user.class.name != "Podcast" &&
@@ -316,8 +317,6 @@ class Comment < ApplicationRecord
   end
 
   def permissions
-    if commentable_type == "Article" && !commentable.published
-      errors.add(:commentable_id, "is not valid.")
-    end
+    errors.add(:commentable_id, "is not valid.") if commentable_type == "Article" && !commentable.published
   end
 end

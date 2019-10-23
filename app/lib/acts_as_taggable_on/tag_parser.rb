@@ -13,7 +13,7 @@ module ActsAsTaggableOn
       return [] if string.blank?
 
       string.downcase.split(",").map do |t|
-        t.strip.gsub(" ", "").gsub(/[^0-9a-z]/i, "")
+        t.strip.delete(" ").gsub(/[^[:alnum:]]/i, "")
       end
     end
 
@@ -21,7 +21,7 @@ module ActsAsTaggableOn
       tags.map do |tag|
         possible_alias = tag
         found_alias = tag
-        until possible_alias == nil
+        until possible_alias.nil?
           possible_alias = find_tag_alias(possible_alias)
           found_alias = possible_alias if possible_alias
         end
@@ -31,8 +31,8 @@ module ActsAsTaggableOn
 
     def find_tag_alias(tag)
       # "&." is "Safe Navigation"; ensure not called on nil
-      alias_for = Tag.find_by_name(tag)&.alias_for
-      alias_for if alias_for.present?
+      alias_for = Tag.find_by(name: tag)&.alias_for
+      alias_for.presence
     end
   end
 end

@@ -1,5 +1,4 @@
 class HexComparer
-  attr_accessor :hexes, :amount
   def initialize(hexes, amount = 1)
     @hexes = hexes
     @amount = amount
@@ -18,8 +17,8 @@ class HexComparer
   end
 
   def brightness(amount = 1)
-    rgb = smallest.gsub("#", "").scan(/../).map(&:hex).map { |color| color * amount }.map(&:round)
-    "#%02x%02x%02x" % rgb
+    rgb = smallest.delete("#").scan(/../).map(&:hex).map { |color| color * amount }.map(&:round)
+    format("#%<r>02x%<g>02x%<b>02x", r: rgb[0], g: rgb[1], b: rgb[2])
   rescue StandardError
     smallest
   end
@@ -43,4 +42,8 @@ class HexComparer
       brightness(0.6**amount)
     end
   end
+
+  private
+
+  attr_accessor :hexes, :amount
 end

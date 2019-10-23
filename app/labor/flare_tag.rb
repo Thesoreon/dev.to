@@ -1,27 +1,29 @@
 class FlareTag
-  attr_accessor :article
-  def initialize(article)
+  FLARE_TAGS = %w[explainlikeimfive
+                  jokes
+                  hacktoberfest
+                  watercooler
+                  ama
+                  techtalks
+                  todayilearned
+                  help
+                  news
+                  healthydebate
+                  showdev
+                  challenge
+                  anonymous
+                  discuss].freeze
+
+  def initialize(article, except_tag = nil)
     @article = article.decorate
+    @except_tag = except_tag
   end
 
   def tag
-    Rails.cache.
-      fetch("article_flare_tag-#{article.id}-#{article.updated_at}", expires_in: 12.hours) do
-      flares = ["explainlikeimfive",
-                "ama",
-                "techtalks",
-                "help",
-                "news",
-                "healthydebate",
-                "showdev",
-                "challenge",
-                "anonymous",
-                "hiring",
-                "discuss"]
-      flares.each do |f|
-        return Tag.find_by_name(f) if article.cached_tag_list_array.include?(f)
-      end
-      nil
+    @tag ||= Rails.cache.fetch("article_flare_tag-#{article.id}-#{article.updated_at}", expires_in: 12.hours) do
+      # Take the first flare tag to show up in the array
+      flare = FLARE_TAGS.detect { |tag| article.cached_tag_list_array.include?(tag) }
+      flare && flare != except_tag ? Tag.select(%i[name bg_color_hex text_color_hex]).find_by(name: flare) : nil
     end
   end
 
@@ -32,4 +34,8 @@ class FlareTag
       bg_color_hex: tag.bg_color_hex,
       text_color_hex: tag.text_color_hex }
   end
+
+  private
+
+  attr_reader :article, :except_tag
 end

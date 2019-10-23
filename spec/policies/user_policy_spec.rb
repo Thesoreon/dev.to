@@ -1,9 +1,9 @@
 require "rails_helper"
 
-RSpec.describe UserPolicy do
+RSpec.describe UserPolicy, type: :policy do
   subject { described_class.new(user, other_user) }
 
-  let(:other_user) { build(:user) }
+  let(:other_user) { build_stubbed(:user) }
 
   context "when user is not signed-in" do
     let(:user) { nil }
@@ -15,7 +15,7 @@ RSpec.describe UserPolicy do
     let(:user) { other_user }
 
     permitted_actions = %i[
-      edit update onboarding_update join_org leave_org dashboard_show remove_association destroy
+      edit update onboarding_update join_org dashboard_show remove_association destroy
     ]
 
     it { is_expected.to permit_actions(permitted_actions) }
@@ -27,36 +27,6 @@ RSpec.describe UserPolicy do
     end
   end
 
-  context "when user is org_admin" do
-    let(:org) { build(:organization) }
-    let(:other_org) { build(:organization) }
-    let(:user) { build(:user, org_admin: true, organization: org) }
-
-    context "with other_user as org_member of same org" do
-      let(:other_user) { build(:user, organization: org) }
-
-      it { is_expected.to permit_actions(%i[add_org_admin remove_from_org]) }
-    end
-
-    context "with other_user as org_member of a different org" do
-      let(:other_user) { build(:user, organization: other_org) }
-
-      it { is_expected.to forbid_actions(%i[add_org_admin remove_from_org]) }
-    end
-
-    context "with other_user as org admin" do
-      let(:other_user) { build(:user, org_admin: true, organization: org) }
-
-      it { is_expected.to permit_actions(%i[remove_org_admin]) }
-    end
-
-    context "with other_user as org adming of a different org" do
-      let(:other_user) { build(:user, org_admin: true, organization: other_org) }
-
-      it { is_expected.to forbid_actions(%i[remove_org_admin]) }
-    end
-  end
-
   context "when user is trusted" do
     let(:user) { build(:user, :trusted) }
 
@@ -64,7 +34,7 @@ RSpec.describe UserPolicy do
   end
 
   context "when user is not trusted" do
-    let(:user) { build(:user) }
+    let(:user) { build_stubbed(:user) }
 
     it { is_expected.to forbid_actions(%i[moderation_routes]) }
   end

@@ -9,6 +9,7 @@ class BadgeAchievement < ApplicationRecord
 
   after_create :notify_recipient
   after_create :send_email_notification
+  after_create :award_credits
   before_validation :render_rewarding_context_message_html
 
   def render_rewarding_context_message_html
@@ -17,21 +18,24 @@ class BadgeAchievement < ApplicationRecord
     parsed_markdown = MarkdownParser.new(rewarding_context_message_markdown)
     html = parsed_markdown.finalize
     final_html = ActionController::Base.helpers.sanitize html,
-      tags: %w(strong em i b u a code),
-      attributes: %w(href name)
+                                                         tags: %w[strong em i b u a code],
+                                                         attributes: %w[href name]
     self.rewarding_context_message = final_html
   end
 
   private
 
   def notify_recipient
-    Notification.send_new_badge_notification(self)
+    Notification.send_new_badge_achievement_notification(self)
   end
 
   def send_email_notification
-    if user.class.name == "User" && user.email.present? && user.email_badge_notifications
-      NotifyMailer.new_badge_email(self).deliver
-    end
+    return unless user.class.name == "User" && user.email.present? && user.email_badge_notifications
+
+    BadgeAchievements::SendEmailNotificationJob.perform_later(id)
   end
-  handle_asynchronously :send_email_notification
+
+  def award_credits
+    Credit.add_to(user, 5)
+  end
 end

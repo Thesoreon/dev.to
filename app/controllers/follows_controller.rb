@@ -10,8 +10,13 @@ class FollowsController < ApplicationController
     if current_user.id == params[:id].to_i && params[:followable_type] == "User"
       render plain: "self"
       return
+    elsif params[:followable_type] == "User" && FollowChecker.new(current_user, params[:followable_type], params[:id]).cached_follow_check && FollowChecker.new(User.find(params[:id]), params[:followable_type], current_user.id).cached_follow_check
+      render plain: "mutual"
+    elsif params[:followable_type] == "User" && FollowChecker.new(User.find(params[:id]), params[:followable_type], current_user.id).cached_follow_check
+      render plain: "follow-back"
+    else
+      render plain: FollowChecker.new(current_user, params[:followable_type], params[:id]).cached_follow_check
     end
-    render plain: FollowChecker.new(current_user, params[:followable_type], params[:id]).cached_follow_check
   end
 
   def create
@@ -20,17 +25,19 @@ class FollowsController < ApplicationController
                    Organization.find(params[:followable_id])
                  elsif params[:followable_type] == "Tag"
                    Tag.find(params[:followable_id])
+                 elsif params[:followable_type] == "Podcast"
+                   Podcast.find(params[:followable_id])
                  else
                    User.find(params[:followable_id])
                  end
-    add_param_context(:followable_type, :followable_id, :verb)
+    need_notification = Follow.need_new_follower_notification_for?(followable.class.name)
     @result = if params[:verb] == "unfollow"
                 follow = current_user.stop_following(followable)
-                Notification.send_new_follower_notification_without_delay(follow, true)
+                Notification.send_new_follower_notification_without_delay(follow, true) if need_notification
                 "unfollowed"
               else
                 follow = current_user.follow(followable)
-                Notification.send_new_follower_notification(follow)
+                Notification.send_new_follower_notification(follow) if need_notification
                 "followed"
               end
     current_user.touch
@@ -40,9 +47,7 @@ class FollowsController < ApplicationController
   def update
     @follow = Follow.find(params[:id])
     authorize @follow
-    if @follow.update(follow_params)
-      redirect_to "/dashboard/following"
-    end
+    redirect_to "/dashboard/following" if @follow.update(follow_params)
   end
 
   private

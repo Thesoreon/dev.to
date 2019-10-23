@@ -1,5 +1,3 @@
-# rubocop:disable Metrics/BlockLength
-#
 def yarn_integrity_enabled?
   ENV.fetch("YARN_INTEGRITY_ENABLED", "true") == "true"
 end
@@ -22,12 +20,12 @@ Rails.application.configure do
   config.consider_all_requests_local = true
 
   # Enable/disable caching. By default caching is disabled.
-  if Rails.root.join("tmp/caching-dev.txt").exist?
+  if Rails.root.join("tmp", "caching-dev.txt").exist?
     config.action_controller.perform_caching = true
 
     config.cache_store = :memory_store
     config.public_file_server.headers = {
-      "Cache-Control" => "public, max-age=172800"
+      "Cache-Control" => "public, max-age=#{2.days.to_i}"
     }
   else
     config.action_controller.perform_caching = false
@@ -44,6 +42,14 @@ Rails.application.configure do
   # Raise an error on page load if there are pending migrations.
   config.active_record.migration_error = :page_load
 
+  # Highlight code that triggered database queries in logs.
+  config.active_record.verbose_query_logs = true
+
+  # Allows setting a warning threshold for query result size.
+  # If the number of records returned by a query exceeds the threshold, a warning is logged.
+  # This can be used to identify queries which might be causing a memory bloat.
+  config.active_record.warn_on_records_fetched_greater_than = 1500
+
   # Debug mode disables concatenation and preprocessing of assets.
   # This option may cause significant delays in view rendering with a large
   # number of complex assets.
@@ -53,7 +59,7 @@ Rails.application.configure do
   # yet still be able to expire them through the digest params.
   config.assets.digest = false
 
-  # Supress logger output for asset requests.
+  # Suppress logger output for asset requests.
   config.assets.quiet = true
 
   # Adds additional error checking when serving assets at runtime.
@@ -79,7 +85,7 @@ Rails.application.configure do
     domain: "localhost:3000"
   }
 
-  config.action_mailer.preview_path = "#{Rails.root}/spec/mailers/previews"
+  config.action_mailer.preview_path = Rails.root.join("spec", "mailers", "previews")
 
   # Raises error for missing translations
   # config.action_view.raise_on_missing_translations = true
@@ -90,7 +96,7 @@ Rails.application.configure do
 
   # Install the Timber.io logger
   send_logs_to_timber = ENV["SEND_LOGS_TO_TIMBER"] || "false" # <---- set to false to stop sending dev logs to Timber.io
-  log_device = (send_logs_to_timber == "true") ? Timber::LogDevices::HTTP.new(ENV["TIMBER"]) : STDOUT
+  log_device = send_logs_to_timber == "true" ? Timber::LogDevices::HTTP.new(ENV["TIMBER"]) : STDOUT
   logger = Timber::Logger.new(log_device)
   logger.level = config.log_level
   config.logger = ActiveSupport::TaggedLogging.new(logger)
@@ -98,7 +104,8 @@ Rails.application.configure do
   config.after_initialize do
     Bullet.enable = true
     Bullet.console = true
+    Bullet.rails_logger = true
   end
 end
 
-# rubocop:enable Metrics/BlockLength
+Rails.application.routes.default_url_options = { host: Rails.application.config.app_domain }

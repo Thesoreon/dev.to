@@ -1,24 +1,26 @@
 class ReplitTag < LiquidTagBase
+  PARTIAL = "liquids/replit".freeze
   def initialize(tag_name, id, tokens)
     super
     @id = parse_id(id)
   end
 
   def render(_context)
-    '<div class="ltag__replit">
-      <iframe frameborder="0" height="550px" src="https://repl.it/' + @id + '?lite=true"></iframe>
-    </div>'
+    ActionController::Base.new.render_to_string(
+      partial: PARTIAL,
+      locals: {
+        id: @id
+      },
+    )
   end
 
   private
 
   def parse_id(input)
     input_no_space = input.delete(" ")
-    if valid_id?(input_no_space)
-      input_no_space
-    else
-      raise StandardError, "Invalid repl.it Id"
-    end
+    raise StandardError, "Invalid repl.it Id" unless valid_id?(input_no_space)
+
+    input_no_space
   end
 
   def valid_id?(id)

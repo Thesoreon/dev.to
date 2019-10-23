@@ -32,6 +32,10 @@ class ApplicationPolicy
     update?
   end
 
+  def manage?
+    update? && record.published
+  end
+
   def destroy?
     false
   end
@@ -65,5 +69,9 @@ class ApplicationPolicy
 
   def user_is_banned?
     user.banned
+  end
+
+  def user_is_trusted?
+    user.has_role?(:trusted)
   end
 end

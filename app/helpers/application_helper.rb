@@ -8,11 +8,15 @@ module ApplicationHelper
   end
 
   def view_class
-    "#{controller_name} #{controller_name}-#{controller.action_name}"
+    if @story_show # custom due to edge cases
+      "stories stories-show"
+    else
+      "#{controller_name} #{controller_name}-#{controller.action_name}"
+    end
   end
 
   def core_pages?
-    %w(
+    %w[
       articles
       podcast_episodes
       events
@@ -30,7 +34,11 @@ module ApplicationHelper
       notifications
       reading_list_items
       html_variants
-    ).include?(controller_name)
+      classified_listings
+      credits
+      partnerships
+      pro_memberships
+    ].include?(controller_name)
   end
 
   def render_js?
@@ -40,10 +48,10 @@ module ApplicationHelper
   end
 
   def title(page_title)
-    derived_title = if page_title.include?("DEV")
+    derived_title = if page_title.include?(ApplicationConfig["COMMUNITY_NAME"])
                       page_title
                     else
-                      page_title + " - DEV Community 👩‍💻👨‍💻"
+                      page_title + " - #{ApplicationConfig['COMMUNITY_NAME']} Community 👩‍💻👨‍💻"
                     end
     content_for(:title) { derived_title }
     derived_title
@@ -67,7 +75,7 @@ module ApplicationHelper
   end
 
   def icon(name, pixels = "20")
-    image_tag icon_url(name), alt: name, class: "icon-img", height: pixels, width: pixels
+    image_tag(icon_url(name), alt: name, class: "icon-img", height: pixels, width: pixels)
   end
 
   def icon_url(name)
@@ -99,47 +107,12 @@ module ApplicationHelper
   end
 
   def cloud_cover_url(url)
-    return if url.blank?
-    return asset_path("triple-unicorn") if Rails.env.test?
-    return url if Rails.env.development?
-
-    width = 1000
-    height = 420
-    quality = "auto"
-
-    cl_image_path(url,
-      type: "fetch",
-      width: width,
-      height: height,
-      crop: "imagga_scale",
-      quality: quality,
-      flags: "progressive",
-      fetch_format: "auto",
-      sign_url: true)
-  end
-
-  def cloud_social_image(article)
-    cache_key = "article-social-img-#{article}-#{article.updated_at}-#{article.comments_count}"
-
-    Rails.cache.fetch(cache_key, expires_in: 1.hour) do
-      src = GeneratedImage.new(article).social_image
-      return src if src.start_with? "https://res.cloudinary.com/"
-
-      cl_image_path(src,
-        type: "fetch",
-        width: "1000",
-        height: "500",
-        crop: "imagga_scale",
-        quality: "auto",
-        flags: "progressive",
-        fetch_format: "auto",
-        sign_url: true)
-    end
+    CloudCoverUrl.new(url).call
   end
 
   def tag_colors(tag)
     Rails.cache.fetch("view-helper-#{tag}/tag_colors", expires_in: 5.hours) do
-      if found_tag = Tag.find_by_name(tag)
+      if (found_tag = Tag.select(%i[bg_color_hex text_color_hex]).find_by(name: tag))
         { background: found_tag.bg_color_hex, color: found_tag.text_color_hex }
       else
         { background: "#d6d9e0", color: "#606570" }
@@ -148,7 +121,7 @@ module ApplicationHelper
   end
 
   def beautified_url(url)
-    url.sub(/^((http[s]?|ftp):\/)?\//, "").sub(/\?.*/, "").chomp("/")
+    url.sub(/\A((http[s]?|ftp):\/)?\//, "").sub(/\?.*/, "").chomp("/")
   rescue StandardError
     url
   end
@@ -159,25 +132,21 @@ module ApplicationHelper
 
   def sanitize_rendered_markdown(processed_html)
     ActionController::Base.helpers.sanitize processed_html.html_safe,
-      scrubber: RenderedMarkdownScrubber.new
+                                            scrubber: RenderedMarkdownScrubber.new
   end
 
   def sanitized_sidebar(text)
     ActionController::Base.helpers.sanitize simple_format(text),
-      tags: %w(p b i em strike strong u br)
-  end
-
-  def track_split_version(url, version)
-    "trackOutboundLink('#{url}','#{version}'); return false;"
+                                            tags: %w[p b i em strike strong u br]
   end
 
   def follow_button(followable, style = "full")
     tag :button, # Yikes
-      class: "cta follow-action-button",
-      data: {
-        info: { id: followable.id, className: followable.class.name, style: style }.to_json,
-        "follow-action-button" => true
-      }
+        class: "cta follow-action-button",
+        data: {
+          info: { id: followable.id, className: followable.class.name, style: style }.to_json,
+          "follow-action-button" => true
+        }
   end
 
   def user_colors_style(user)
@@ -197,5 +166,17 @@ module ApplicationHelper
     return "" if params[:tag].blank?
 
     "/t/#{params[:tag]}"
+  end
+
+  def logo_svg
+    if ApplicationConfig["LOGO_SVG"].present?
+      ApplicationConfig["LOGO_SVG"].html_safe
+    else
+      inline_svg("devplain.svg", class: "logo", size: "20% * 20%", aria: true, title: "App logo")
+    end
+  end
+
+  def community_qualified_name
+    "The #{ApplicationConfig['COMMUNITY_NAME']} Community"
   end
 end
